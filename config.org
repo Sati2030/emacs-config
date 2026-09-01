@@ -163,7 +163,7 @@ theme has loaded.
 
 #+begin_src emacs-lisp
 (with-eval-after-load 'doom-themes
-  (set-face-attribute 'region nil :background "#3574f0" :extend t))
+  (set-face-attribute 'region nil :background "#5e81ac" :extend t))
 #+end_src
 
 ** Cursor beacon
