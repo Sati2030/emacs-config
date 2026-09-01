@@ -390,8 +390,11 @@ anyway, because a freeze you cannot reproduce on demand is the case opt-in
 logging always misses. The toggle below drops back to 3 if it bites.
 
 =tramp-debug-to-file= mirrors each =*debug tramp/...*= buffer to a file of the
-same name in =temporary-file-directory=. Buffers die with the process, so the
-file is what survives a force quit, which is the reason to bother.
+same name in =tramp-compat-temporary-file-directory=, which resolves to
+=~/.cache/emacs/= rather than =temporary-file-directory= whenever
+=$XDG_CACHE_HOME= (or its =~/.cache= default) is writable. Buffers die with the
+process, so the file is what survives a force quit, which is the reason to
+bother.
 
 Connections are cached, so the toggle flushes them: without that you keep the
 existing session and never see the handshake where hangs usually happen.
@@ -433,6 +436,19 @@ Company is the best Emacs completion system.
   (company-tooltip-limit 10 "The more the merrier.")
   :config
   (global-company-mode 1))
+#+end_src
+
+** Yasnippet
+
+lsp-mode uses this to expand snippet-style completions from language
+servers (e.g. filling in a function's argument placeholders after you
+accept a completion). Without it, lsp-mode warns at startup and falls
+back to plain-text insertion.
+
+#+begin_src emacs-lisp
+(use-package yasnippet
+  :config
+  (yas-global-mode 1))
 #+end_src
 * Shell
 ** Vterm
