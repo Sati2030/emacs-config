@@ -1,0 +1,24 @@
+# Generated from config.org on every startup — not source
+config.el
+config.elc
+
+# Package installs and native-comp cache
+elpa/
+eln-cache/
+
+# Runtime/session state
+.cache/
+.claude/
+.lsp-session-v1
+auto-save-list/
+auto-saves/
+backups/
+eshell/
+projectile-bookmarks.eld
+projects
+recentf
+request/
+tramp
+transient/
+tree-sitter/
+url/
