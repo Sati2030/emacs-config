@@ -4,6 +4,11 @@
 #+author: Seiji
 #+property: header-args:emacs-lisp :tangle yes :results silent
 
+First tangled line of config.el, so it picks up lexical binding.
+#+begin_src emacs-lisp
+;; -*- lexical-binding: t; -*-
+#+end_src
+
 * Package management
 
 Set up the package archives and bootstrap =use-package=. From here on,
@@ -227,6 +232,8 @@ https://github.com/larrasket/emacs-liquid-glass).
 (eval-and-compile
   (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory)))
 (require 'lr-macos-glass)
+(when (display-graphic-p)
+  (salih/set-glass 0.8 0))
 #+end_src
 
 * Minibuffer & navigation
