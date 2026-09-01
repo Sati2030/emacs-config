@@ -233,7 +233,7 @@ https://github.com/larrasket/emacs-liquid-glass).
   (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory)))
 (require 'lr-macos-glass)
 (when (display-graphic-p)
-  (salih/set-glass 0.8 0))
+  (salih/set-glass 0.3 0))
 #+end_src
 
 * Minibuffer & navigation
