@@ -154,6 +154,18 @@ enough.
   (load-theme 'doom-one))
 #+end_src
 
+** Region/selection highlight
+
+=doom-one='s default =region= face is too desaturated to read against
+the transparent glass background (see Transparent emacs below), so
+override it with a more saturated, higher-contrast color once the
+theme has loaded.
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'doom-themes
+  (set-face-attribute 'region nil :background "#3574f0" :extend t))
+#+end_src
+
 ** Cursor beacon
 
 A trailing pulse to make the cursor easier to find after big jumps.
