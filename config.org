@@ -215,8 +215,18 @@ Configurations for mostly the org mode that you are watching right now
 #+end_src
 
 ** Transparent emacs
+
+=alpha-background= is a no-op on macOS (never implemented on the
+Nextstep backend). Real transparency here comes from a
+=NSGlassEffectView=-based Cocoa patch on this machine's
+=emacs-plus@31= build, requires macOS 26+. See
+=~/.emacs.d/lisp/lr-macos-glass.el= (from
+https://github.com/larrasket/emacs-liquid-glass).
+
 #+begin_src emacs-lisp
-(add-to-list 'default-frame-alist '(alpha-background . 20))
+(eval-and-compile
+  (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory)))
+(require 'lr-macos-glass)
 #+end_src
 
 * Minibuffer & navigation
