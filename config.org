@@ -1107,11 +1107,18 @@ Uses an xwidget-webkit buffer when available, else the external browser."
 
 ** Multiple cursors (Cmd+D style, mark next occurrence incrementally)
 
+Cmd is mapped to Meta on this machine, so real Cmd+D is =M-d=, which is
+normally =kill-word=. We move =kill-word= to =C-<delete>= (the common
+Windows/Linux "delete word forward" convention) to free up =M-d= for
+Cmd+D style multiple cursor marking.
+
 #+begin_src emacs-lisp
+(global-set-key (kbd "C-<delete>") #'kill-word)
+
 (use-package multiple-cursors
   :ensure t
-  :bind (("s-d" . mc/mark-next-symbol-like-this)
-         ("s-D" . mc/mark-previous-symbol-like-this)))
+  :bind (("M-d" . mc/mark-next-symbol-like-this)
+         ("M-D" . mc/mark-previous-symbol-like-this)))
 #+end_src
 
 ** Shell prompt shows cwd
