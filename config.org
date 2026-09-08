@@ -1105,12 +1105,13 @@ Uses an xwidget-webkit buffer when available, else the external browser."
   :ensure t)
 #+end_src
 
-** iedit (edit all occurrences of a word at once)
+** Multiple cursors (Cmd+D style, mark next occurrence incrementally)
 
 #+begin_src emacs-lisp
-(use-package iedit
+(use-package multiple-cursors
   :ensure t
-  :bind (("C-;" . iedit-mode)))
+  :bind (("s-d" . mc/mark-next-symbol-like-this)
+         ("s-D" . mc/mark-previous-symbol-like-this)))
 #+end_src
 
 ** Shell prompt shows cwd
