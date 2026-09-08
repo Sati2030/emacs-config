@@ -1105,6 +1105,14 @@ Uses an xwidget-webkit buffer when available, else the external browser."
   :ensure t)
 #+end_src
 
+** iedit (edit all occurrences of a word at once)
+
+#+begin_src emacs-lisp
+(use-package iedit
+  :ensure t
+  :bind (("C-;" . iedit-mode)))
+#+end_src
+
 ** Shell prompt shows cwd
 
 #+begin_src emacs-lisp
