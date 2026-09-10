@@ -433,6 +433,33 @@ Open remote buffers reconnect on their next access."
            temporary-file-directory))
 #+end_src
 
+** Freeze debugging: CPU profiler
+
+The Tramp log above only has something to say once Tramp is actually
+talking to the remote. A freeze that happens *before* that, e.g. stuck in
+Elisp resolving a project root, leaves no trace in it at all. This
+catches that case instead.
+
+Start the profiler before the operation that might freeze, and when it
+is over, stop it and read the report. It is a sampling profiler, so the
+overhead is small enough to leave running.
+
+#+begin_src emacs-lisp
+(defun my/profiler-toggle ()
+  "Start the CPU profiler, or stop it and show the report.
+Start this before an operation you expect to freeze. Run it again once
+the freeze is over to see where the time actually went, including any
+time spent before Tramp got involved."
+  (interactive)
+  (require 'profiler)
+  (if (profiler-running-p)
+      (progn
+        (profiler-stop)
+        (profiler-report))
+    (profiler-start 'cpu)
+    (message "CPU profiler running. Run `my/profiler-toggle' again after the freeze to see the report.")))
+#+end_src
+
 * Completion
 
 ** Company
@@ -487,11 +514,41 @@ back to plain-text insertion.
 Flycheck is the newer version of flymake and is needed to make
 =lsp-mode= behave.
 
+Flycheck's idle-check timer (=flycheck-idle-change-delay=, 0.5s) fires
+constantly while you type, and it does not know or care that Tramp might
+already be mid-call. If the timer fires while a save is blocked inside
+Tramp (=verify-visited-file-modtime= doing a remote =stat= is a normal
+part of every save), flycheck tries to check the buffer, which needs the
+same Tramp connection, which Tramp refuses ("Forbidden reentrant call of
+Tramp") because it is already locked by the save. This is confirmed from
+a live =C-g= backtrace during a freeze: =save-buffer= blocked in
+=tramp-wait-for-regexp=, with =flycheck--handle-idle-trigger= erroring on
+top of it on repeat.
+
+=lsp-prefer-flymake nil= below means =lsp-mode= renders its diagnostics
+through flycheck, not flymake, so flycheck-mode itself has to stay on for
+remote buffers or lsp's checks stop showing at all. The =idle-change=
+trigger is the only one of flycheck's automatic triggers that can fire
+mid-call like this: =save= and =new-line= only ever run once the previous
+command, Tramp call included, has already returned, since Emacs runs one
+command to completion before the next starts. So only drop =idle-change=
+for Tramp buffers; =save= and =new-line= stay, meaning remote buffers
+recheck on save and on every completed line, just not on every keystroke.
+
 #+begin_src emacs-lisp
 (use-package flycheck
   :config
   (add-hook 'prog-mode-hook 'flycheck-mode)
-  (add-hook 'after-init-hook #'global-flycheck-mode))
+  (add-hook 'after-init-hook #'global-flycheck-mode)
+  ;; Drop the idle timer for Tramp buffers only. See note above: it is the
+  ;; one trigger that can fire while Tramp is mid-call, which is what was
+  ;; freezing Emacs. `save' and `new-line' can't collide that way, so they
+  ;; stay, keeping checks close to live without the risk.
+  (add-hook 'flycheck-mode-hook
+            (lambda ()
+              (when (file-remote-p default-directory)
+                (setq-local flycheck-check-syntax-automatically
+                            (remq 'idle-change flycheck-check-syntax-automatically))))))
 #+end_src
 
 * Language Server Protocol
