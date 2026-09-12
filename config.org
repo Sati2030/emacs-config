@@ -1132,25 +1132,37 @@ Uses an xwidget-webkit buffer when available, else the external browser."
 ;; runs, so a brand new lib/ folder isn't visible to clangd until this runs.
 #+begin_src emacs-lisp
 (defun reload-arudino-compile-json ()
-  "Regenerate compile_commands.json via PlatformIO so the LSP picks up new lib/ folders, then restart the LSP workspace."
+  "Regenerate compile_commands.json via PlatformIO so the LSP picks up new lib/ folders, then restart the LSP workspace.
+Runs pio in a hidden buffer, which is only displayed if the build fails."
   (interactive)
   (let* ((root (or (when (fboundp 'projectile-project-root)
                      (projectile-project-root))
                    (when (fboundp 'project-root)
                      (project-root (project-current)))
                    default-directory))
-         (default-directory root))
-    (async-shell-command "pio run -t compiledb -e unified" "*pio-compiledb*")
-    (let ((proc (get-buffer-process "*pio-compiledb*")))
-      (when proc
-        (set-process-sentinel
-         proc
-         (lambda (process _event)
-           (when (eq (process-status process) 'exit)
-             (if (zerop (process-exit-status process))
-                 (when (fboundp 'lsp-workspace-restart)
-                   (lsp-workspace-restart))
-               (message "pio compiledb failed, skipping lsp-workspace-restart")))))))))
+         (default-directory root)
+         ;; Captured now because the sentinel runs from the process buffer,
+         ;; which has no LSP workspace of its own to look up.
+         (workspaces (and (fboundp 'lsp-workspaces) (lsp-workspaces)))
+         ;; Leading space keeps the buffer out of buffer lists.
+         (buf (get-buffer-create " *pio-compiledb*")))
+    (when (process-live-p (get-buffer-process buf))
+      (user-error "pio compiledb is already running"))
+    (with-current-buffer buf (erase-buffer))
+    (message "Running pio compiledb...")
+    (make-process
+     :name "pio-compiledb"
+     :buffer buf
+     :command '("pio" "run" "-t" "compiledb" "-e" "unified")
+     :sentinel
+     (lambda (process _event)
+       (when (memq (process-status process) '(exit signal))
+         (if (zerop (process-exit-status process))
+             (progn
+               (message "pio compiledb done, restarting LSP")
+               (mapc #'lsp-workspace-restart workspaces))
+           (message "pio compiledb failed")
+           (display-buffer (process-buffer process))))))))
 
 #+end_src
 * Misc utilities
