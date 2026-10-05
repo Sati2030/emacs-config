@@ -1,5 +1,3 @@
-
-
 #+title: Emacs Configuration
 #+author: Seiji
 #+property: header-args:emacs-lisp :tangle yes :results silent
@@ -11,27 +9,17 @@ Enables lexical binding for the tangled config.el.
 
 * Package management
 
-Package archives and the =use-package= bootstrap. Every package below is
-installed and configured through =use-package=.
+Package archives and =use-package= settings. Emacs activates installed
+packages before loading the init file and ships =use-package=, so
+neither needs bootstrapping. Every package below is installed and
+configured through =use-package=.
 
 #+begin_src emacs-lisp
 (require 'package)
-
-(defmacro append-to-list (target suffix)
-  "Append SUFFIX to TARGET in place."
-  `(setq ,target (append ,target ,suffix)))
-
-(append-to-list package-archives
-                '(("melpa"        . "https://melpa.org/packages/")
-                  ("melpa-stable" . "https://stable.melpa.org/packages/")
-                  ("org-elpa"     . "https://orgmode.org/elpa/")))
-
-(package-initialize)
-
-;; Install use-package on first run.
-(unless (package-installed-p 'use-package)
-  (package-refresh-contents)
-  (package-install 'use-package))
+(dolist (archive '(("melpa"        . "https://melpa.org/packages/")
+                   ("melpa-stable" . "https://stable.melpa.org/packages/")
+                   ("org-elpa"     . "https://orgmode.org/elpa/")))
+  (add-to-list 'package-archives archive t))
 
 (require 'use-package)
 (setq use-package-always-ensure t   ;; Auto-install missing packages
@@ -50,6 +38,13 @@ buffer. Real errors are still reported.
 
 * Environment
 
+** OS detection
+
+#+begin_src emacs-lisp
+(defconst *is-a-mac*   (eq system-type 'darwin))
+(defconst *is-a-linux* (eq system-type 'gnu/linux))
+#+end_src
+
 ** Shell environment on macOS / X
 
 Imports environment variables from the login shell, so =PATH=, the .NET
@@ -57,14 +52,12 @@ and the ESP-IDF variables match the terminal.
 
 #+begin_src emacs-lisp
 (use-package exec-path-from-shell
-  :ensure t
   :if (memq window-system '(mac ns x))
-  :init
-  (setq exec-path-from-shell-variables
-        '("PATH" "DOTNET_ROOT" "DOTNET_CLI_HOME" "HOME"))
+  :custom
+  (exec-path-from-shell-variables
+   '("PATH" "DOTNET_ROOT" "DOTNET_CLI_HOME" "HOME"
+     "IDF_PATH" "IDF_PYTHON_ENV_PATH" "IDF_TOOLS_PATH"))
   :config
-  (dolist (var '("IDF_PATH" "IDF_PYTHON_ENV_PATH" "IDF_TOOLS_PATH"))
-    (add-to-list 'exec-path-from-shell-variables var))
   (exec-path-from-shell-initialize))
 #+end_src
 
@@ -76,7 +69,7 @@ time, which no longer exists after a gcc upgrade and makes =ld= warn on
 every compile.
 
 #+begin_src emacs-lisp
-(when (eq system-type 'darwin)
+(when *is-a-mac*
   (let* ((versioned (car (last (file-expand-wildcards
                                 "/opt/homebrew/lib/gcc/current/gcc/*/[0-9]*"))))
          (dirs (seq-filter #'file-directory-p
@@ -96,25 +89,17 @@ Stores Customize settings in =custom.el= instead of the init file.
 (load custom-file 'noerror)
 #+end_src
 
-** OS detection
-
-#+begin_src emacs-lisp
-(defconst *is-a-mac*   (eq system-type 'darwin))
-(defconst *is-a-linux* (eq system-type 'gnu/linux))
-#+end_src
-
-** macOS tweaks
+** macOS modifiers
 
 Maps Cmd to Meta and Option to Super.
 
 #+begin_src emacs-lisp
 (when *is-a-mac*
-  (setq mac-command-modifier 'meta)
-  (setq mac-option-modifier  'super)
-  (setq default-input-method "MacOSX"))
+  (setq mac-command-modifier 'meta
+        mac-option-modifier  'super))
 #+end_src
 
-** Linux tweaks
+** Linux modifiers
 
 #+begin_src emacs-lisp
 (when *is-a-linux*
@@ -129,24 +114,17 @@ Starts every frame maximized.
 (add-to-list 'default-frame-alist '(fullscreen . maximized))
 #+end_src
 
-
 * Appearance
 
 ** Theme
 
+Loads =doom-one= and replaces its =region= face with a higher-contrast
+color that stays readable on the transparent background.
+
 #+begin_src emacs-lisp
 (use-package doom-themes
   :config
-  (load-theme 'doom-one))
-#+end_src
-
-** Region/selection highlight
-
-Replaces =doom-one='s =region= face with a higher-contrast color that
-stays readable on the transparent background.
-
-#+begin_src emacs-lisp
-(with-eval-after-load 'doom-themes
+  (load-theme 'doom-one t)
   (set-face-attribute 'region nil :background "#5e81ac" :extend t))
 #+end_src
 
@@ -156,12 +134,11 @@ Pulses the cursor line after large vertical jumps.
 
 #+begin_src emacs-lisp
 (use-package beacon
-  :ensure t
-  :init
-  (beacon-mode 1)
+  :custom
+  (beacon-blink-when-point-moves-vertically 10)
+  (beacon-blink-when-point-moves-horizontally 0)
   :config
-  (setq beacon-blink-when-point-moves-vertically 10)
-  (setq beacon-blink-when-point-moves-horizontally 0))
+  (beacon-mode 1))
 #+end_src
 
 ** Right-to-left rendering
@@ -171,39 +148,29 @@ analysis, which speeds up redisplay.
 
 #+begin_src emacs-lisp
 (setq-default bidi-paragraph-direction 'left-to-right)
-
-(if (version<= "27.1" emacs-version)
-    (setq bidi-inhibit-bpa t))
+(setq bidi-inhibit-bpa t)
 #+end_src
 
-** Org Mode Configurations
+** Org mode
 
-Org display settings: hidden markup, indentation, modern bullets,
-variable-pitch text and scaled headings. =C-c C-j= runs =org-goto=.
+Org display settings: hidden markup, indentation, variable-pitch text
+and scaled headings. =org-modern= styles headline stars, lists, tables
+and keywords.
 
 #+begin_src emacs-lisp
-(with-eval-after-load 'org
-  (setq org-hide-emphasis-markers t
-        org-startup-indented      t
-        org-startup-truncated     nil
-        org-ellipsis              " ▾"
-        org-hide-leading-stars    t
-        org-src-fontify-natively  t
-        org-src-tab-acts-natively t
-        org-edit-src-content-indentation 0))
-
-(use-package org-modern
-  :hook (org-mode . org-modern-mode))
-
-(use-package org-superstar
-  :hook (org-mode . org-superstar-mode)
+(use-package org
+  :ensure nil
+  :hook (org-mode . variable-pitch-mode)
+  :custom
+  (org-hide-emphasis-markers t)
+  (org-startup-indented      t)
+  (org-startup-truncated     nil)
+  (org-ellipsis              " ▾")
+  (org-hide-leading-stars    t)
+  (org-src-fontify-natively  t)
+  (org-src-tab-acts-natively t)
+  (org-src-content-indentation 0)
   :config
-  (setq org-superstar-headline-bullets-list '("◉" "○" "▶" "▷" "◆" "◇")))
-
-(add-hook 'org-mode-hook #'variable-pitch-mode)
-
-
-(with-eval-after-load 'org-faces
   (dolist (face '((org-level-1 . 1.4)
                   (org-level-2 . 1.25)
                   (org-level-3 . 1.15)
@@ -211,9 +178,11 @@ variable-pitch text and scaled headings. =C-c C-j= runs =org-goto=.
                   (org-level-5 . 1.05)))
     (set-face-attribute (car face) nil :weight 'bold :height (cdr face))))
 
-(with-eval-after-load 'org
-  (define-key org-mode-map (kbd "C-c C-j") #'org-goto))
-
+(use-package org-modern
+  :hook (org-mode . org-modern-mode)
+  :custom
+  (org-modern-star 'replace)
+  (org-modern-replace-stars "◉○▶▷◆◇"))
 #+end_src
 
 ** Transparent emacs
@@ -240,21 +209,23 @@ Filtering completion UI for =M-x= and other minibuffer prompts.
 
 #+begin_src emacs-lisp
 (use-package ivy
-  :init
-  (ivy-mode 1)
-  (setq ivy-height 15
-        ivy-use-virtual-buffers t
-        ivy-use-selectable-prompt t))
+  :custom
+  (ivy-height 15)
+  (ivy-use-virtual-buffers t)
+  (ivy-use-selectable-prompt t)
+  :config
+  (ivy-mode 1))
 #+end_src
 
 ** Counsel
 
+Ivy versions of common commands such as =find-file= and =describe-function=.
+
 #+begin_src emacs-lisp
 (use-package counsel
   :after ivy
-  :init
-  (counsel-mode 1)
-  :bind (:map ivy-minibuffer-map))
+  :config
+  (counsel-mode 1))
 #+end_src
 
 * Projects
@@ -262,31 +233,35 @@ Filtering completion UI for =M-x= and other minibuffer prompts.
 ** Projectile
 
 Project detection, file finding and search, under the =C-c p= prefix.
+=projectile-ripgrep= (=C-c p s r=) needs the =ripgrep= package.
 
 #+begin_src emacs-lisp
 (use-package projectile
-  :init
-  (projectile-mode t)
+  :demand t
   :bind (:map projectile-mode-map
               ("C-c p" . projectile-command-map))
+  :custom
+  (projectile-enable-caching t)
+  (projectile-completion-system 'ivy)
   :config
-  (setq projectile-enable-caching t
-        projectile-completion-system 'ivy))
-#+end_src
+  (projectile-mode 1))
 
-** Counsel + Projectile
-
-#+begin_src emacs-lisp
 (use-package counsel-projectile
-  :init
-  (counsel-projectile-mode))
+  :after (counsel projectile)
+  :config
+  (counsel-projectile-mode 1))
+
+(use-package ripgrep)
 #+end_src
 
-** Ripgrep
+** Project root lookup
+
+=my/project-root= is the root used by the project commands below.
 
 #+begin_src emacs-lisp
-(use-package projectile-ripgrep
-  :after projectile)
+(defun my/project-root ()
+  "Return projectile's root for the current buffer, else `default-directory'."
+  (or (projectile-project-root) default-directory))
 #+end_src
 
 ** Let project.el use projectile's roots
@@ -299,10 +274,8 @@ files under the root, tracked or not.
 #+begin_src emacs-lisp
 (defun my/project-projectile (dir)
   "Return a transient project rooted at projectile's root for DIR, else nil."
-  (when (fboundp 'projectile-project-root)
-    (let ((root (projectile-project-root dir)))
-      (when root
-        (cons 'transient root)))))
+  (when-let* ((root (projectile-project-root dir)))
+    (cons 'transient root)))
 
 (with-eval-after-load 'project
   ;; Appended, so the built-in VCS backend takes precedence.
@@ -311,7 +284,7 @@ files under the root, tracked or not.
 
 * Files & backups
 
-Put auto-save and backup files in one place, and disable lock files.
+Puts auto-save and backup files in one place, and disables lock files.
 
 #+begin_src emacs-lisp
 ;; Auto-save files (#file#)
@@ -327,7 +300,6 @@ Put auto-save and backup files in one place, and disable lock files.
       kept-old-versions 2
       version-control t)
 
-;; Don't create lock files
 (setq create-lockfiles nil)
 #+end_src
 
@@ -361,8 +333,8 @@ UI until it returns.
 
 Logs all traffic to and from the remote end (=tramp-verbose= 6, default
 3), and mirrors each =*debug tramp/...*= buffer to a file under
-=~/.cache/emacs/= so the log survives a force quit. Level 6 adds latency
-to every TRAMP call.
+=temporary-file-directory= so the log survives a force quit. Level 6
+adds latency to every TRAMP call.
 
 =my/tramp-debug-toggle= switches between levels 6 and 3, and closes
 cached connections so the next one is logged from the handshake.
@@ -402,7 +374,7 @@ record.
         (profiler-stop)
         (profiler-report))
     (profiler-start 'cpu)
-    (message "CPU profiler running. Run `my/profiler-toggle' again after the freeze to see the report.")))
+    (message "CPU profiler running. Run `my/profiler-toggle' again to see the report.")))
 #+end_src
 
 * Completion
@@ -410,9 +382,11 @@ record.
 ** Company
 
 In-buffer completion popup, enabled globally with no idle delay.
+=C-.= completes manually; flyspell's binding of the same key is removed.
 
 #+begin_src emacs-lisp
 (use-package company
+  :demand t
   :bind (("C-." . company-complete))
   :custom
   (company-idle-delay 0)
@@ -420,6 +394,9 @@ In-buffer completion popup, enabled globally with no idle delay.
   (company-tooltip-limit 10)
   :config
   (global-company-mode 1))
+
+(with-eval-after-load 'flyspell
+  (define-key flyspell-mode-map (kbd "C-.") nil))
 #+end_src
 
 ** Yasnippet
@@ -432,22 +409,36 @@ such as a function's arguments.
   :config
   (yas-global-mode 1))
 #+end_src
+
 * Shell
+
 ** Vterm
+
+=s-<backspace>= and =C-<backspace>= delete the previous word in the
+terminal program instead of the Emacs buffer.
+
 #+begin_src emacs-lisp
 (use-package vterm
- :commands vterm
- :custom
- (vterm-max-scrollback 100000)
- :config
- ;; Delete the previous word in the terminal program, not the Emacs buffer.
- (defun my-vterm-backward-kill-word ()
-   (interactive)
-   ;; Sends M-DEL, which readline and the Claude CLI treat as backward-kill-word.
-   (vterm-send-key "<backspace>" nil t nil))
- (define-key vterm-mode-map (kbd "s-<backspace>") #'my-vterm-backward-kill-word)
- (define-key vterm-mode-map (kbd "C-<backspace>") #'my-vterm-backward-kill-word))
+  :commands vterm
+  :custom
+  (vterm-max-scrollback 100000)
+  :config
+  (defun my/vterm-backward-kill-word ()
+    "Send M-DEL, which readline and the Claude CLI treat as backward-kill-word."
+    (interactive)
+    (vterm-send-key "<backspace>" nil t nil))
+  (define-key vterm-mode-map (kbd "s-<backspace>") #'my/vterm-backward-kill-word)
+  (define-key vterm-mode-map (kbd "C-<backspace>") #'my/vterm-backward-kill-word))
 #+end_src
+
+** Shell commands
+
+Shows the current directory in the =M-!= prompt.
+
+#+begin_src emacs-lisp
+(setq shell-command-prompt-show-cwd t)
+#+end_src
+
 * Linting
 
 ** Flycheck
@@ -461,8 +452,7 @@ reentrant call of Tramp" error. They still recheck on save and on newline.
 #+begin_src emacs-lisp
 (use-package flycheck
   :config
-  (add-hook 'prog-mode-hook 'flycheck-mode)
-  (add-hook 'after-init-hook #'global-flycheck-mode)
+  (global-flycheck-mode 1)
   (add-hook 'flycheck-mode-hook
             (lambda ()
               (when (file-remote-p default-directory)
@@ -472,63 +462,47 @@ reentrant call of Tramp" error. They still recheck on save and on newline.
 
 * Language Server Protocol
 
-** lsp - init
-#+begin_src emacs-lisp
-
-(defun my/lsp-mode-init()
-  (setq lsp-clients-clangd-args
-	'("--background-index"
-	  "--header-insertion=iwyu"
-	  "-j=4"))
-  )
-
-#+end_src
-
-
 ** lsp-mode
+
+C# uses OmniSharp from a local build, LaTeX uses texlab, and clangd
+indexes in the background.
 
 #+begin_src emacs-lisp
 (use-package lsp-mode
-  :commands lsp
-  :init (my/lsp-mode-init)
-  :hook ((csharp-mode . lsp-deferred)
-         (LaTeX-mode  . lsp-deferred)
-	 (c-mode . lsp-deferred)
-	 (c++-mode  . lsp-deferred)
-	 (css-mode . lsp-deferred)
-	 (typescript-ts-mode . lsp-deferred)
-	 (tsx-ts-mode . lsp-deferred))
-  :config
-  (setq lsp-prefer-flymake nil                 ;; Use flycheck for diagnostics
-        lsp-headerline-breadcrumb-mode nil)
-
-  (setq lsp-disabled-clients '(csharp-roslyn csharp-ls))
-  (setq lsp-csharp-server-path
-        "/Users/seijisato/dev/omnisharp/OmniSharp")
-  (setq lsp-csharp-omnisharp-roslyn-binary-path
-        "/Users/seijisato/dev/omnisharp/OmniSharp")
-  (setq lsp-tex-server 'texlab
-        lsp-idle-delay 0.5)
-
+  :hook ((csharp-mode        . lsp-deferred)
+         (LaTeX-mode         . lsp-deferred)
+         (c-mode             . lsp-deferred)
+         (c++-mode           . lsp-deferred)
+         (css-mode           . lsp-deferred)
+         (typescript-ts-mode . lsp-deferred)
+         (tsx-ts-mode        . lsp-deferred))
+  :custom
+  (lsp-headerline-breadcrumb-enable nil)
+  (lsp-enable-on-type-formatting nil)
+  (lsp-idle-delay 0.5)
+  (lsp-clients-clangd-args '("--background-index"
+                             "--header-insertion=iwyu"
+                             "-j=4"))
+  (lsp-disabled-clients '(csharp-roslyn csharp-ls))
+  (lsp-csharp-server-path (expand-file-name "~/dev/omnisharp/OmniSharp"))
+  (lsp-tex-server 'texlab)
   ;; Takes a list of keywords, not a boolean. A value of t signals
   ;; wrong-type-argument when clangd requests signature help.
-  (setq lsp-signature-auto-activate '(:on-trigger-char :on-server-request)
-        lsp-signature-render-documentation nil))
+  (lsp-signature-auto-activate '(:on-trigger-char :on-server-request))
+  (lsp-signature-render-documentation nil))
 #+end_src
-
 
 ** lsp-ui
 
 #+begin_src emacs-lisp
 (use-package lsp-ui
-  :commands lsp-ui-mode
   :hook (lsp-mode . lsp-ui-mode)
-  :config
-  (setq lsp-ui-doc-enable     t
-        lsp-ui-doc-delay      0.8
-        lsp-ui-doc-position   'at-point
-        lsp-ui-sideline-enable nil
-        lsp-ui-peek-enable    t))
+  :custom
+  (lsp-ui-doc-enable      t)
+  (lsp-ui-doc-delay       0.8)
+  (lsp-ui-doc-position    'at-point)
+  (lsp-ui-sideline-enable nil)
+  (lsp-ui-peek-enable     t))
 #+end_src
 
 ** Signature help
@@ -543,7 +517,7 @@ a trigger character such as =(= or =,=, and manually anywhere with
 
 (with-eval-after-load 'lsp-mode
   ;; Terminal frames keep the default bottom-line renderer.
-  (when (and (display-graphic-p) (require 'posframe nil t))
+  (when (display-graphic-p)
     (setq lsp-signature-function #'lsp-signature-posframe))
 
   ;; Size the frame to its content, up to 6 lines.
@@ -556,44 +530,19 @@ a trigger character such as =(= or =,=, and manually anywhere with
   (define-key lsp-mode-map (kbd "C-c s") #'lsp-signature-activate))
 #+end_src
 
-** Disable on-type formatting
-
-#+begin_src emacs-lisp
-(setq lsp-enable-on-type-formatting nil)
-#+end_src
-
-** TypeScript / TSX
-
-Tree-sitter modes give syntax coloring; lsp-mode (typescript-language-server)
-gives completion/suggestions. Grammars auto-install on first open if missing.
-
-#+begin_src emacs-lisp
-;; Where to fetch the grammars from
-(append-to-list treesit-language-source-alist
-  '((typescript . ("https://github.com/tree-sitter/tree-sitter-typescript"
-                   "master" "typescript/src"))
-    (tsx . ("https://github.com/tree-sitter/tree-sitter-typescript"
-            "master" "tsx/src"))))
-
-;; Auto-install grammars if not present
-(dolist (lang '(typescript tsx))
-  (unless (treesit-ready-p lang t)
-    (treesit-install-language-grammar lang)))
-
-;; Use the tree-sitter modes for .ts / .tsx
-(add-to-list 'auto-mode-alist '("\\.ts\\'"  . typescript-ts-mode))
-(add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))
-#+end_src
-
 * Spelling & grammar
 
 ** ispell / flyspell
 
+Spell checks prose buffers, and comments and strings in code. =M-c=
+checks the word at point.
+
 #+begin_src emacs-lisp
-(setq ispell-program-name "aspell")
-(setq ispell-dictionary "en_GB")
-(add-hook 'text-mode-hook 'flyspell-mode)
+(setq ispell-program-name "aspell"
+      ispell-dictionary "en_GB")
+(add-hook 'text-mode-hook #'flyspell-mode)
 (add-hook 'prog-mode-hook #'flyspell-prog-mode)
+(global-set-key (kbd "M-c") #'ispell-word)
 #+end_src
 
 ** langtool
@@ -602,9 +551,8 @@ Grammar checking through LanguageTool.
 
 #+begin_src emacs-lisp
 (use-package langtool
-  :ensure t
-  :config
-  (setq langtool-bin "/opt/homebrew/languagetool"))
+  :custom
+  (langtool-bin "/opt/homebrew/languagetool"))
 #+end_src
 
 * Version control
@@ -612,8 +560,7 @@ Grammar checking through LanguageTool.
 ** Magit
 
 #+begin_src emacs-lisp
-(use-package magit
-  :ensure t)
+(use-package magit)
 #+end_src
 
 * Languages
@@ -624,12 +571,11 @@ Grammar checking through LanguageTool.
 
 #+begin_src emacs-lisp
 (use-package cmake-mode
-  :ensure t
   :mode (("CMakeLists\\.txt\\'" . cmake-mode)
          ("\\.cmake\\'"         . cmake-mode)))
 #+end_src
 
-*** ESP-IDF project detection
+*** ESP-IDF / PlatformIO clangd
 
 Inside ESP-IDF (=sdkconfig=) or PlatformIO (=platformio.ini=) projects,
 uses Espressif's clangd, which supports the Xtensa and RISC-V targets,
@@ -638,71 +584,131 @@ use the clangd on =PATH=.
 
 #+begin_src emacs-lisp
 (defun my/esp-project-p ()
-  "Return non-nil if the current buffer is inside an ESP-IDF or PlatformIO ESP project."
-  (or (locate-dominating-file
-       (or buffer-file-name default-directory)
-       "sdkconfig")
-      (locate-dominating-file
-       (or buffer-file-name default-directory)
-       "platformio.ini")))
+  "Return non-nil if the current buffer is inside an ESP-IDF or PlatformIO project."
+  (let ((dir (or buffer-file-name default-directory)))
+    (or (locate-dominating-file dir "sdkconfig")
+        (locate-dominating-file dir "platformio.ini"))))
 
 (defun my/c-mode-setup ()
+  "Point clangd at Espressif's build and toolchains in ESP projects."
   (when (my/esp-project-p)
+    ;; Defines the clangd options; this hook runs before lsp-mode loads.
+    (require 'lsp-clangd)
     (setq-local lsp-clients-clangd-executable
                 (expand-file-name
                  "~/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd"))
     (setq-local lsp-clients-clangd-args
                 (append lsp-clients-clangd-args
-                        '("--query-driver=/Users/seijisato/.platformio/packages/**/bin/*-elf-*")))))
+                        (list (concat "--query-driver="
+                                      (expand-file-name
+                                       "~/.platformio/packages/**/bin/*-elf-*")))))))
 
 (add-hook 'c-mode-common-hook #'my/c-mode-setup)
+#+end_src
+
+*** ESP32 =.dir-locals.el= creation
+
+=my/create-esp32-dir-locals= writes a =.dir-locals.el= in the project
+root that sets projectile's compile command to =idf.py build= and its
+run command to =idf.py flash monitor=.
+
+#+begin_src emacs-lisp
+(defun my/create-esp32-dir-locals ()
+  "Create a .dir-locals.el for an ESP32 project in the current project root."
+  (interactive)
+  (let ((file (expand-file-name ".dir-locals.el" (my/project-root))))
+    (if (file-exists-p file)
+        (message "%s already exists" file)
+      (with-temp-file file
+        (insert ";;; Directory Local Variables\n"
+                ";;; For more information see (info \"(emacs) Directory Variables\")\n\n"
+                "((nil . ((projectile-project-compilation-cmd . \"idf.py build\")\n"
+                "         (projectile-project-run-cmd . \"idf.py flash monitor\"))))\n"))
+      (message "Created %s" file))))
+#+end_src
+
+*** Reload PlatformIO compile_commands.json for clangd
+
+=my/pio-reload-compile-commands= regenerates =compile_commands.json=
+with =pio run -t compiledb= and restarts the LSP workspace, so clangd
+sees newly added =lib/= folders.
+
+#+begin_src emacs-lisp
+(defun my/pio-reload-compile-commands ()
+  "Regenerate compile_commands.json via PlatformIO, then restart the LSP workspace.
+Runs pio in a hidden buffer that is shown only if the build fails."
+  (interactive)
+  (let* ((default-directory (my/project-root))
+         ;; Captured here, since the sentinel runs in the process buffer,
+         ;; which has no LSP workspace.
+         (workspaces (and (fboundp 'lsp-workspaces) (lsp-workspaces)))
+         ;; Leading space keeps the buffer out of buffer lists.
+         (buf (get-buffer-create " *pio-compiledb*")))
+    (when (process-live-p (get-buffer-process buf))
+      (user-error "pio compiledb is already running"))
+    (with-current-buffer buf (erase-buffer))
+    (message "Running pio compiledb...")
+    (make-process
+     :name "pio-compiledb"
+     :buffer buf
+     :command '("pio" "run" "-t" "compiledb" "-e" "unified")
+     :sentinel
+     (lambda (process _event)
+       (when (memq (process-status process) '(exit signal))
+         (if (zerop (process-exit-status process))
+             (progn
+               (message "pio compiledb done, restarting LSP")
+               (mapc #'lsp-workspace-restart workspaces))
+           (message "pio compiledb failed")
+           (display-buffer (process-buffer process))))))))
 #+end_src
 
 ** C#
 
 *** Brace auto-formatting
 
-Smart =({= and =})= insertion that opens a properly indented block,
-but inserts a literal brace when typed inside a string.
+Typing ={= opens an indented block on a new line, and =}= closes it,
+leaving point on the empty line between the braces. Inside strings, and
+after a space for ={= or after code for =}=, the brace is inserted as is.
 
 #+begin_src emacs-lisp
-(defun inside-quotes-question ()
+(defun my/in-string-p ()
+  "Return non-nil if point is inside a string."
   (nth 3 (syntax-ppss)))
 
-(defun my-csharp-open-brace ()
+(defun my/csharp-open-brace ()
+  "Insert {, opening an indented block unless in a string or after a space."
   (interactive)
-  (if (or (inside-quotes-question)
+  (if (or (my/in-string-p)
           (eq (char-before) ?\s))
       (insert "{")
-    (progn
-      (newline)
-      (insert "{")
-      (indent-according-to-mode)
-      (newline)
-      (indent-according-to-mode))))
+    (newline)
+    (insert "{")
+    (indent-according-to-mode)
+    (newline)
+    (indent-according-to-mode)))
 
-(defun my-csharp-close-brace ()
+(defun my/csharp-close-brace ()
+  "Insert }, closing an indented block unless in a string or after code."
   (interactive)
-  (if (or (inside-quotes-question)
+  (if (or (my/in-string-p)
           (and (not (memq (char-before) '(?\s ?\t)))
                (save-excursion
                  (search-backward "{" nil t))))
       (insert "}")
-    (progn
-      (newline)
-      (insert "}")
-      (indent-according-to-mode)
-      (previous-line)
-      (indent-according-to-mode))))
+    (newline)
+    (insert "}")
+    (indent-according-to-mode)
+    (forward-line -1)
+    (indent-according-to-mode)))
 
 (add-hook 'csharp-mode-hook
           (lambda ()
-            (local-set-key (kbd "{") #'my-csharp-open-brace)
-            (local-set-key (kbd "}") #'my-csharp-close-brace)))
-
+            (local-set-key (kbd "{") #'my/csharp-open-brace)
+            (local-set-key (kbd "}") #'my/csharp-close-brace)))
 #+end_src
 
-* LaTeX
+** LaTeX
 
 *** AUCTeX
 
@@ -717,29 +723,33 @@ with SyncTeX.
                   (TeX-PDF-mode 1)              ; compile to PDF
                   (TeX-source-correlate-mode 1) ; SyncTeX support
                   (prettify-symbols-mode 1)     ; show λ instead of \lambda
-                  (turn-on-reftex)              ; reference/citation management
-                  (setq TeX-auto-save t         ; parse on save
-                        TeX-parse-self t        ; parse on open
-                        TeX-save-query nil)))   ; save without asking before compile
+                  (turn-on-reftex)))            ; reference/citation management
+  :custom
+  (TeX-auto-save t)                     ; parse on save
+  (TeX-parse-self t)                    ; parse on open
+  (TeX-save-query nil)                  ; save without asking before compile
+  (TeX-master nil)                      ; ask which file is master in multi-file projects
+  (TeX-view-program-selection '((output-pdf "PDF Tools")))
+  (TeX-view-program-list      '(("PDF Tools" TeX-pdf-tools-sync-view)))
+  (TeX-source-correlate-start-server t)
   :config
-  (setq-default TeX-master nil)  ; ask which file is master in multi-file projects
-  (setq TeX-view-program-selection '((output-pdf "PDF Tools")))
-  (setq TeX-view-program-list      '(("PDF Tools" TeX-pdf-tools-sync-view)))
-  (setq TeX-source-correlate-start-server t)
-  (setq TeX-command-force "LaTeX")  ; skip the "Command:" prompt, C-c C-c always compiles
+  (setq TeX-command-force "LaTeX")      ; skip the "Command:" prompt, C-c C-c always compiles
   (add-hook 'TeX-after-compilation-finished-functions
             #'TeX-revert-document-buffer))
 #+end_src
 
 *** pdf-tools
 
-PDF viewer inside Emacs with SyncTeX.
+PDF viewer inside Emacs with SyncTeX. =pdf-loader-install= defers
+loading pdf-tools until the first PDF is opened.
 
 #+begin_src emacs-lisp
 (use-package pdf-tools
-  :config
-  (pdf-tools-install)
-  (setq pdf-view-resize-factor 1.1))
+  :defer t
+  :custom
+  (pdf-view-resize-factor 1.1)
+  :init
+  (pdf-loader-install))
 #+end_src
 
 ** Markdown
@@ -749,8 +759,8 @@ PDF viewer inside Emacs with SyncTeX.
 #+begin_src emacs-lisp
 (use-package markdown-mode
   :mode ("\\.md\\'" . markdown-mode)
-  :config
-  (setq markdown-command "pandoc --standalone --mathjax"))
+  :custom
+  (markdown-command "pandoc --standalone --mathjax"))
 #+end_src
 
 *** Live preview via impatient-mode + pandoc
@@ -764,24 +774,24 @@ support.
 (use-package simple-httpd)
 (use-package impatient-mode)
 
-(defun my-filter (buffer)
-  (let (html source-text)
-    (with-current-buffer buffer
-      (setq source-text
-            (buffer-substring-no-properties (point-min) (point-max))))
-    (setq html
-          (with-temp-buffer
-            (insert source-text)
-            (call-process-region
-             (point-min) (point-max)
-             "pandoc"
-             t t nil
-             "-f" "markdown+tex_math_dollars"
-             "-t" "html5"
-             "--standalone"
-             "--mathjax")
-            (buffer-string)))
-    (princ html)))
+(defun my/browse-url-in-emacs (url)
+  "Open URL in an xwidget-webkit buffer, or externally without xwidget support.
+Return non-nil if it opened in Emacs."
+  (if (featurep 'xwidget-internal)
+      (progn (xwidget-webkit-browse-url url) t)
+    (browse-url url)
+    nil))
+
+(defun my/imp-markdown-filter (buffer)
+  "Print BUFFER's markdown rendered to standalone HTML by pandoc."
+  (princ (with-temp-buffer
+           (insert-buffer-substring-no-properties buffer)
+           (call-process-region (point-min) (point-max) "pandoc" t t nil
+                                "-f" "markdown+tex_math_dollars"
+                                "-t" "html5"
+                                "--standalone"
+                                "--mathjax")
+           (buffer-string))))
 
 (defun my/imp-live-url ()
   "URL that impatient-mode serves the current buffer at."
@@ -792,11 +802,8 @@ support.
   "Show this buffer's impatient preview in an xwidget beside it.
 Falls back to the external browser on builds without xwidget support."
   (interactive)
-  (let ((url (my/imp-live-url))
-        (source (current-buffer)))
-    (if (not (featurep 'xwidget-internal))
-        (browse-url url)
-      (xwidget-webkit-browse-url url)
+  (let ((source (current-buffer)))
+    (when (my/browse-url-in-emacs (my/imp-live-url))
       ;; Restore the source buffer and show the preview in a side window.
       (let ((preview (current-buffer)))
         (switch-to-buffer source)
@@ -805,14 +812,15 @@ Falls back to the external browser on builds without xwidget support."
                           (side . right)
                           (window-width . 0.5)))))))
 
-(defun impatient-markdown ()
-  (unless (process-status "httpd")
+(defun my/impatient-markdown ()
+  "Serve the current markdown buffer through impatient-mode and preview it."
+  (unless (httpd-running-p)
     (httpd-start))
   (impatient-mode 1)
-  (imp-set-user-filter #'my-filter)
+  (imp-set-user-filter #'my/imp-markdown-filter)
   (my/imp-preview-in-emacs))
 
-(add-hook 'markdown-mode-hook #'impatient-markdown)
+(add-hook 'markdown-mode-hook #'my/impatient-markdown)
 #+end_src
 
 *** Scrolling the impatient preview with normal keys
@@ -882,7 +890,29 @@ var w=(f&&f.contentWindow)?f.contentWindow:window;%s})();" expr)))
   (define-key xwidget-webkit-mode-map (kbd "DEL") #'my/xwidget-scroll-down))
 #+end_src
 
-*** Live frontend preview via live-server
+** TypeScript / TSX
+
+Tree-sitter modes give syntax coloring; lsp-mode (typescript-language-server)
+gives completion/suggestions. Grammars auto-install on first open if missing.
+
+#+begin_src emacs-lisp
+(dolist (source '((typescript "https://github.com/tree-sitter/tree-sitter-typescript"
+                              "master" "typescript/src")
+                  (tsx "https://github.com/tree-sitter/tree-sitter-typescript"
+                       "master" "tsx/src")))
+  (add-to-list 'treesit-language-source-alist source t))
+
+(dolist (lang '(typescript tsx))
+  (unless (treesit-ready-p lang t)
+    (treesit-install-language-grammar lang)))
+
+(add-to-list 'auto-mode-alist '("\\.ts\\'"  . typescript-ts-mode))
+(add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))
+#+end_src
+
+** Web frontend previews
+
+*** Static pages via live-server
 
 =my/frontend-preview= runs the =live-server= npm dev server in the
 project root and opens the current file in the browser, which reloads on
@@ -894,13 +924,10 @@ npm i -g live-server
 
 #+begin_src emacs-lisp
 (defun my/frontend-preview ()
-  "Run live-server in the project root, opening the current HTML buffer.
-If the current buffer visits a file, live-server opens that file
-\(e.g. frontend/web/public/mockup.html); otherwise it serves the root."
+  "Run live-server in the project root, opening the current file.
+Serves the root without opening a file when the buffer visits none."
   (interactive)
-  (let* ((root (or (and (fboundp 'projectile-project-root)
-                        (projectile-project-root))
-                   default-directory))
+  (let* ((root (my/project-root))
          (default-directory root)
          (rel (and buffer-file-name
                    (file-relative-name buffer-file-name root)))
@@ -910,38 +937,13 @@ If the current buffer visits a file, live-server opens that file
     (async-shell-command cmd "*live-server*")))
 #+end_src
 
-*** Next.js / .tsx preview
+*** npm dev server (Next.js and other Node projects)
 
 =my/next-preview= runs =npm run dev= in the nearest =package.json=
 directory, installing =node_modules= first if missing, and opens
-=http://localhost:3000=. Killing the =*next-dev*= buffer stops it.
-
-#+begin_src emacs-lisp
-(defvar my/next-port 3000 "Port the dev server is expected to serve on.")
-
-(defun my/next-preview ()
-  "Run `npm run dev` in the nearest package.json dir and open the browser."
-  (interactive)
-  (let* ((dir (locate-dominating-file
-               (or buffer-file-name default-directory) "package.json")))
-    (unless dir (user-error "No package.json found above %s"
-                            (or buffer-file-name default-directory)))
-    (let ((default-directory dir))
-      (unless (file-directory-p (expand-file-name "node_modules" dir))
-        (message "node_modules missing — running npm install first...")
-        (call-process "npm" nil "*npm-install*" t "install"))
-      (async-shell-command "npm run dev" "*next-dev*")
-      (run-at-time 4 nil
-                   (lambda ()
-                     (browse-url (format "http://localhost:%d" my/next-port))))
-      (message "Starting Next dev server in %s ..." dir))))
-#+end_src
-
-*** Preview rendered page inside Emacs (xwidget, with fallback)
-
-=my/node-preview-in-emacs= runs =npm run dev= in the nearest
-=package.json= directory and shows the site in an =xwidget-webkit=
-buffer, or in the external browser when Emacs lacks xwidget support.
+=http://localhost:3000= in the browser. =my/node-preview-in-emacs= does
+the same but shows the site in an =xwidget-webkit= buffer when Emacs has
+xwidget support. Killing the =*next-dev*= buffer stops the server.
 xwidgets require an Emacs built with:
 
 #+begin_example
@@ -949,102 +951,49 @@ brew install emacs-plus --with-xwidgets --with-native-comp
 #+end_example
 
 #+begin_src emacs-lisp
-(defun my/node-preview-in-emacs ()
-  "Start `npm run dev' in nearest package.json dir, show the site.
-Uses an xwidget-webkit buffer when available, else the external browser."
-  (interactive)
+(defvar my/next-port 3000 "Port the dev server is expected to serve on.")
+
+(defun my/npm-dev-start (open-fn)
+  "Run `npm run dev' in the nearest package.json dir, then call OPEN-FN on its URL.
+Runs `npm install' first when node_modules is missing."
   (let ((dir (locate-dominating-file
               (or buffer-file-name default-directory) "package.json")))
     (unless dir
-      (user-error "No package.json above %s"
+      (user-error "No package.json found above %s"
                   (or buffer-file-name default-directory)))
     (let ((default-directory dir)
           (url (format "http://localhost:%d" my/next-port)))
+      (unless (file-directory-p (expand-file-name "node_modules" dir))
+        (message "node_modules missing, running npm install first...")
+        (call-process "npm" nil "*npm-install*" t "install"))
       (async-shell-command "npm run dev" "*next-dev*")
-      (run-at-time
-       5 nil
-       (lambda ()
-         (if (featurep 'xwidget-internal)
-             (xwidget-webkit-browse-url url)
-           (browse-url url)))))))
+      ;; Give the server time to start listening before opening the page.
+      (run-at-time 5 nil open-fn url)
+      (message "Starting dev server in %s ..." dir))))
+
+(defun my/next-preview ()
+  "Start the npm dev server and open the site in the external browser."
+  (interactive)
+  (my/npm-dev-start #'browse-url))
+
+(defun my/node-preview-in-emacs ()
+  "Start the npm dev server and show the site inside Emacs when possible."
+  (interactive)
+  (my/npm-dev-start #'my/browse-url-in-emacs))
 #+end_src
 
 ** Jupyter / Python
 
 #+begin_src emacs-lisp
-(use-package ein
-  :ensure t)
+(use-package ein)
 #+end_src
 
-* ESP32 functions
-** .dir-locals.el creation
-#+begin_src emacs-lisp
-(defun my/create-esp32-dir-locals ()
-  "Create a .dir-locals.el for an ESP32 project in the current project root."
-  (interactive)
-  (let* ((root (or (when (fboundp 'projectile-project-root)
-                     (projectile-project-root))
-                   (when (fboundp 'project-root)
-                     (project-root (project-current)))
-                   default-directory))
-         (file (expand-file-name ".dir-locals.el" root)))
-    (if (file-exists-p file)
-        (message "%s already exists" file)
-      (with-temp-file file
-        (insert ";;; Directory Local Variables\n")
-        (insert ";;; For more information see (info \"(emacs) Directory Variables\")\n\n")
-        (insert "((nil . ((projectile-project-compilation-cmd . \"idf.py build\")\n")
-        (insert "         (projectile-project-run-cmd . \"idf.py flash monitor\")))) \n"))
-      (message "Created %s" file))))
-
-#+end_src
-** Reload PlatformIO compile_commands.json for clangd
-
-Regenerates =compile_commands.json= with =pio run -t compiledb= and
-restarts the LSP workspace, so clangd sees newly added =lib/= folders.
-
-#+begin_src emacs-lisp
-(defun reload-arudino-compile-json ()
-  "Regenerate compile_commands.json via PlatformIO, then restart the LSP workspace.
-Runs pio in a hidden buffer that is shown only if the build fails."
-  (interactive)
-  (let* ((root (or (when (fboundp 'projectile-project-root)
-                     (projectile-project-root))
-                   (when (fboundp 'project-root)
-                     (project-root (project-current)))
-                   default-directory))
-         (default-directory root)
-         ;; Captured here, since the sentinel runs in the process buffer,
-         ;; which has no LSP workspace.
-         (workspaces (and (fboundp 'lsp-workspaces) (lsp-workspaces)))
-         ;; Leading space keeps the buffer out of buffer lists.
-         (buf (get-buffer-create " *pio-compiledb*")))
-    (when (process-live-p (get-buffer-process buf))
-      (user-error "pio compiledb is already running"))
-    (with-current-buffer buf (erase-buffer))
-    (message "Running pio compiledb...")
-    (make-process
-     :name "pio-compiledb"
-     :buffer buf
-     :command '("pio" "run" "-t" "compiledb" "-e" "unified")
-     :sentinel
-     (lambda (process _event)
-       (when (memq (process-status process) '(exit signal))
-         (if (zerop (process-exit-status process))
-             (progn
-               (message "pio compiledb done, restarting LSP")
-               (mapc #'lsp-workspace-restart workspaces))
-           (message "pio compiledb failed")
-           (display-buffer (process-buffer process))))))))
-
-#+end_src
-* Misc utilities
+* Editing
 
 ** Avy (jump-to-char)
 
 #+begin_src emacs-lisp
-(use-package avy
-  :ensure t)
+(use-package avy)
 #+end_src
 
 ** Multiple cursors
@@ -1056,28 +1005,86 @@ point, =M-D= at the previous one. =kill-word= moves to =C-<delete>=.
 (global-set-key (kbd "C-<delete>") #'kill-word)
 
 (use-package multiple-cursors
-  :ensure t
   :bind (("M-d" . mc/mark-next-symbol-like-this)
          ("M-D" . mc/mark-previous-symbol-like-this)))
 #+end_src
 
-** Shell prompt shows cwd
+** Keybindings
+
+Global editing commands and their bindings.
 
 #+begin_src emacs-lisp
-(setq shell-command-prompt-show-cwd t)
+;; Backtab unindents the line
+(global-set-key (kbd "<backtab>") #'indent-rigidly-left-to-tab-stop)
+
+;; Word-wise motion on Super
+(global-set-key (kbd "s-b") #'backward-word)
+(global-set-key (kbd "s-f") #'forward-word)
+
+;; Scroll one line
+(global-set-key (kbd "C-c ,") #'scroll-down-line)
+(global-set-key (kbd "C-c .") #'scroll-up-line)
+
+(defun my/backward-kill-word-on-line ()
+  "Like `backward-kill-word', but stop at the start of the line.
+At the start of a line, delete the preceding newline instead."
+  (interactive)
+  (let ((start (point))
+        (bol (line-beginning-position)))
+    (skip-syntax-backward " " bol)
+    (if (= (point) bol)
+        (delete-char -1)
+      (backward-word 1)
+      (kill-region (point) start))))
+
+(global-set-key (kbd "s-<backspace>") #'my/backward-kill-word-on-line)
+(global-set-key (kbd "C-<backspace>") #'my/backward-kill-word-on-line)
+
+(defun my/close-other-window ()
+  "Delete the next window."
+  (interactive)
+  (other-window 1)
+  (delete-window))
+
+(global-set-key (kbd "C-c q") #'my/close-other-window)
+
+(defun my/set-or-deactivate-mark ()
+  "Set the mark, or deactivate it if it is active."
+  (interactive)
+  (if mark-active
+      (deactivate-mark)
+    (set-mark-command nil)))
+
+(global-set-key (kbd "C-SPC") #'my/set-or-deactivate-mark)
+
+(defun my/move-lines (command n)
+  "Run COMMAND with N, honouring any active remapping of it.
+This lets `xwidget-webkit-mode' remaps scroll the page instead of
+moving point."
+  (funcall (or (command-remapping command) command) n))
+
+(defun my/next-line-5 ()
+  "Move (or scroll) down 5 lines."
+  (interactive)
+  (my/move-lines #'next-line 5))
+
+(defun my/previous-line-5 ()
+  "Move (or scroll) up 5 lines."
+  (interactive)
+  (my/move-lines #'previous-line 5))
+
+(global-set-key (kbd "s-n") #'my/next-line-5)
+(global-set-key (kbd "s-p") #'my/previous-line-5)
 #+end_src
 
 * Start page
 
-** Disable the default landing page
+Replaces the default startup screen with an =enlight= dashboard of
+project directories.
 
 #+begin_src emacs-lisp
 (setq inhibit-startup-screen t)
-#+end_src
 
-** Custom dashboard via enlight
-
-#+begin_src emacs-lisp
 (use-package enlight
   :custom
   (enlight-content
@@ -1086,139 +1093,50 @@ point, =M-D= at the previous one. =kill-word= moves to =C-<delete>=.
     "\n"
     (enlight-menu
      '(("QUT"
-        ("QUT"                                (dired "~/Documents/QUT")          "q")
-        ("CAB420 - Machine Learning"          (dired "~/Documents/QUT/CAB420")   "m")
-        ("CAB301 - Algorithms & Complexity"   (dired "~/Documents/QUT/CAB301")   "a")
-        ("IFB398 - Capstone"                  (dired "~/Documents/QUT/IFB398")   "c")
-	("IFB399 - Capstone repo"       (dired "~/dev/QUT/Capstone/Project_Kaizen") "r"))
+        ("QUT"                              (dired "~/Documents/QUT")                    "q")
+        ("CAB420 - Machine Learning"        (dired "~/Documents/QUT/CAB420")             "m")
+        ("CAB301 - Algorithms & Complexity" (dired "~/Documents/QUT/CAB301")             "a")
+        ("IFB398 - Capstone"                (dired "~/Documents/QUT/IFB398")             "c")
+        ("IFB399 - Capstone repo"           (dired "~/dev/QUT/Capstone/Project_Kaizen") "r"))
        ("CodeCrafters"
-        ("GIT"   (dired "~/Documents/CodeCrafters/git_Seiji")              "g")
-        ("SHELL" (dired "~/Documents/CodeCrafters/codecrafters-shell-c")   "s"))
+        ("GIT"   (dired "~/Documents/CodeCrafters/git_Seiji")            "g")
+        ("SHELL" (dired "~/Documents/CodeCrafters/codecrafters-shell-c") "s"))
        ("Nottingham"
         ("All"                  (dired "~/Documents/Nottingham")          "n")
         ("Software Engineering" (dired "~/Documents/Nottingham/COMP1003") "s"))
        ("Others"
-	("FullStack" (dired "~/Documents/FullStack-Course") "f")
-	("C++ learning" (dired "~/dev/Cpp") "p") )
-       )))))
+        ("FullStack"    (dired "~/Documents/FullStack-Course") "f")
+        ("C++ learning" (dired "~/dev/Cpp")                    "p")))))))
 
 (setopt initial-buffer-choice #'enlight)
 #+end_src
 
-
-* Custom functions
-
-** Delete word backwards on the current line only
-
-Like =backward-kill-word=, but stops at the start of the line. At the
-start of a line it deletes one character.
-
-#+begin_src emacs-lisp
-(defun my-backwards-kill-word-on-line ()
-  (interactive)
-  (let ((start (point))
-        (bol (line-beginning-position)))
-    (skip-syntax-backward " " bol)
-    (if (= (point) bol)
-        (delete-char -1)
-      (progn
-        (backward-word 1)
-        (kill-region (point) start)))))
-#+end_src
-
-* Keybindings
-
-Global keybindings.
-
-#+begin_src emacs-lisp
-;; Backtab unindents the line
-(global-set-key (kbd "<backtab>") #'indent-rigidly-left-to-tab-stop)
-
-;; Delete the previous word, stopping at the start of the line
-(global-set-key (kbd "s-<backspace>") #'my-backwards-kill-word-on-line)
-(global-set-key (kbd "C-<backspace>") #'my-backwards-kill-word-on-line)
-
-;; Spell-check the word at point
-(global-set-key (kbd "M-c") #'ispell-word)
-
-;; Remove flyspell's C-. binding
-(with-eval-after-load 'flyspell
-  (define-key flyspell-mode-map (kbd "C-.") nil))
-
-(global-set-key (kbd "C-.") #'company-complete)
-
-;; Word-wise motion on Super
-(global-set-key (kbd "s-b") #'backward-word)
-(global-set-key (kbd "s-f") #'forward-word)
-
-;; Remove flyspell and org C-, bindings
-(with-eval-after-load 'flyspell
-  (define-key flyspell-mode-map (kbd "C-,") nil))
-(with-eval-after-load 'org
-  (define-key org-mode-map (kbd "C-,") nil))
-
-;; Close the other window
-(defun close-other-window ()
-  (interactive)
-  (other-window 1)
-  (delete-window))
-(global-set-key (kbd "C-c q") 'close-other-window)
-
-;; C-SPC sets the mark, or deactivates it if active
-(defun my-set-or-deactivate-mark ()
-  (interactive)
-  (if mark-active
-      (deactivate-mark)
-    (set-mark-command nil)))
-
-(global-set-key (kbd "C-SPC") 'my-set-or-deactivate-mark)
-
-;; Scroll one line
-(global-set-key (kbd "C-c ,") 'scroll-down-line)
-(global-set-key (kbd "C-c .") 'scroll-up-line)
-
-;; Move or scroll 5 lines at a time
-(defun my/move-lines (command n)
-  "Run COMMAND with N, honouring any active remapping of it.
-This lets `xwidget-webkit-mode' remaps scroll the page instead of
-moving point."
-  (funcall (or (command-remapping command) command) n))
-
-(defun my-next-line-5 ()
-  "Move (or scroll) down 5 lines."
-  (interactive)
-  (my/move-lines #'next-line 5))
-
-(defun my-last-line-5 ()
-  "Move (or scroll) up 5 lines."
-  (interactive)
-  (my/move-lines #'previous-line 5))
-
-
-(global-set-key (kbd "s-n") 'my-next-line-5)
-(global-set-key (kbd "s-p") 'my-last-line-5)
-
-
-#+end_src
 * Claude
-#+begin_src emacs-lisp
 
-;; Terminal backend for Claude sessions, built on Ghostty's VT engine. Its
-;; native module is downloaded from the GitHub releases on first use.
+** Ghostel terminal
+
+Terminal backend for Claude sessions, built on Ghostty's VT engine. Its
+native module is downloaded from the GitHub releases on first use.
+
+=C-p= / =C-n= scroll the chat one step and =s-p= / =s-n= five steps,
+while Claude's prompt history stays on the arrow keys. When the app
+tracks the mouse (Claude Code's fullscreen renderer), its history lives
+inside the app and the buffer holds only the visible rows, so scrolling
+sends it wheel presses (button 4 up, 5 down) at the middle row. Claude
+does not use the alternate screen here, so =ghostel-alt-screen-p= cannot
+detect this. Otherwise the history is buffer text, so the Emacs window
+scrolls, and ghostel re-anchors it to the live cursor once it is back at
+the bottom.
+
+#+begin_src emacs-lisp
 (use-package ghostel
   :defer t
   :custom
   (ghostel-module-auto-install 'download)
   :config
-  ;; Scroll the way the trackpad does. When the app tracks the mouse (Claude
-  ;; Code's fullscreen renderer), its history lives inside the app and the
-  ;; buffer holds only the visible rows, so send it wheel presses (button 4
-  ;; up, 5 down) at the middle row. Claude does not use the alternate screen
-  ;; here, so `ghostel-alt-screen-p' cannot detect this. Otherwise the history
-  ;; is buffer text, so scroll the Emacs window, which ghostel re-anchors to
-  ;; the live cursor once it is back at the bottom. N is the number of wheel
-  ;; presses, or of lines in the Emacs window.
   (defun my/ghostel-scroll (button n)
+    "Scroll N steps up (BUTTON 4) or down (BUTTON 5).
+A step is a wheel press when the app tracks the mouse, else a window line."
     (if (ghostel--mouse-tracking-p ghostel--term)
         (dotimes (_ n)
           (ghostel--mouse-event ghostel--term 0 button
@@ -1237,10 +1155,9 @@ moving point."
     (interactive)
     (my/ghostel-scroll 5 5))
 
-  ;; C-p and C-n scroll the chat instead of walking Claude's prompt history,
-  ;; which stays on the arrow keys. As exceptions they are no longer sent to
-  ;; the terminal and fall through to `ghostel-mode-map', the parent of the
-  ;; input mode maps. Bindings there survive because ghostel rebuilds only
+  ;; As exceptions, C-p and C-n are not sent to the terminal and fall
+  ;; through to `ghostel-mode-map', the parent of the input mode maps.
+  ;; Bindings there survive because ghostel rebuilds only
   ;; `ghostel-semi-char-mode-map' (from this exception list).
   (customize-set-variable 'ghostel-keymap-exceptions
                           (append ghostel-keymap-exceptions '("C-p" "C-n")))
@@ -1252,21 +1169,26 @@ moving point."
   ;; Copy and Emacs modes also inherit `ghostel-mode-map'; keep line motion.
   (define-key ghostel-readonly-mode-map (kbd "C-p") #'previous-line)
   (define-key ghostel-readonly-mode-map (kbd "C-n") #'next-line)
-  (define-key ghostel-readonly-mode-map (kbd "s-p") #'my-last-line-5)
-  (define-key ghostel-readonly-mode-map (kbd "s-n") #'my-next-line-5)
+  (define-key ghostel-readonly-mode-map (kbd "s-p") #'my/previous-line-5)
+  (define-key ghostel-readonly-mode-map (kbd "s-n") #'my/next-line-5)
   ;; Sends M-DEL, which the Claude CLI treats as backward-kill-word.
   (define-key ghostel-mode-map (kbd "s-<backspace>")
               (lambda () (interactive) (ghostel-send-key "backspace" "meta"))))
+#+end_src
 
+** claude-code-ide
+
+Claude Code sessions inside Emacs, opened from =C-c C-'= or =M-x claude=,
+with the Emacs MCP tools enabled.
+
+#+begin_src emacs-lisp
 (use-package claude-code-ide
   :vc (:url "https://github.com/manzaltu/claude-code-ide.el" :rev :newest)
-  :bind ("C-c C-" . claude-code-ide-menu)
+  :bind ("C-c C-'" . claude-code-ide-menu)
   :custom
   (claude-code-ide-terminal-backend 'ghostel)
-  ;; Disable the reflow workaround. It leaves libvterm and the PTY with
-  ;; mismatched sizes, which corrupts the Claude TUI when the window height
-  ;; changes.
-  (claude-code-ide-prevent-reflow-glitch nil)
+  :init
+  (defalias 'claude #'claude-code-ide-menu)
   :config
   ;; The MCP HTTP server signals `json-rpc-error' without defining it, so its
   ;; own handler cannot catch it. Defining it makes the server reply with a
@@ -1283,17 +1205,14 @@ moving point."
                   ("prompts/list" '((prompts . [])))
                   (_ (funcall orig method params)))))
 
-  (claude-code-ide-emacs-tools-setup) ; Enable Emacs MCP tools
-  (defalias 'claude #'claude-code-ide-menu))
-
+  (claude-code-ide-emacs-tools-setup))
 #+end_src
-* Docker
-#+begin_src emacs-lisp
 
+* Docker
+
+#+begin_src emacs-lisp
 (use-package docker
-  :ensure t
   :bind ("C-c d" . docker)
   :custom
   (docker-terminal-backend 'vterm))
-
 #+end_src
