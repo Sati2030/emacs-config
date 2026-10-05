@@ -1174,8 +1174,8 @@ Global keybindings.
 (global-set-key (kbd "C-SPC") 'my-set-or-deactivate-mark)
 
 ;; Scroll one line
-(global-set-key (kbd "C-,") 'scroll-down-line)
-(global-set-key (kbd "C-.") 'scroll-up-line)
+(global-set-key (kbd "C-c ,") 'scroll-down-line)
+(global-set-key (kbd "C-c .") 'scroll-up-line)
 
 ;; Move or scroll 5 lines at a time
 (defun my/move-lines (command n)
