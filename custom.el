@@ -9,7 +9,13 @@
    '("7771c8496c10162220af0ca7b7e61459cb42d18c35ce272a63461c0fc1336015"
      "0325a6b5eea7e5febae709dab35ec8648908af12cf2d2b569bedc8da0a3a81c1"
      default))
- '(package-selected-packages '(claude-code-ide docker posframe))
+ '(package-selected-packages
+   '(auctex avy beacon claude-code-ide cmake-mode company counsel
+	    counsel-projectile docker doom-themes ein enlight
+	    exec-path-from-shell flycheck ghostel impatient-mode ivy
+	    langtool lsp-mode lsp-ui magit markdown-mode multiple-cursors
+	    org-modern pdf-tools posframe projectile ripgrep simple-httpd
+	    vterm yasnippet))
  '(package-vc-selected-packages
    '((claude-code-ide :url
 		      "https://github.com/manzaltu/claude-code-ide.el")

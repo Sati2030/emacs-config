@@ -331,17 +331,16 @@ UI until it returns.
 
 ** Remote (TRAMP) debugging
 
-Logs all traffic to and from the remote end (=tramp-verbose= 6, default
-3), and mirrors each =*debug tramp/...*= buffer to a file under
-=temporary-file-directory= so the log survives a force quit. Level 6
-adds latency to every TRAMP call.
-
-=my/tramp-debug-toggle= switches between levels 6 and 3, and closes
-cached connections so the next one is logged from the handshake.
+TRAMP logs at its default level 3. =my/tramp-debug-toggle= switches to
+level 6, which logs all traffic to and from the remote end and mirrors
+each =*debug tramp/...*= buffer to a file under
+=temporary-file-directory=, so the log survives a force quit. Level 6
+adds latency to every TRAMP call. Toggling closes cached connections so
+the next one is logged from the handshake.
 
 #+begin_src emacs-lisp
-(setq tramp-verbose 6
-      tramp-debug-to-file t)
+(setq tramp-verbose 3
+      tramp-debug-to-file nil)
 
 (defun my/tramp-debug-toggle ()
   "Toggle verbose TRAMP logging to debug buffers and to disk.
@@ -547,12 +546,17 @@ checks the word at point.
 
 ** langtool
 
-Grammar checking through LanguageTool.
+Grammar and style checking through the LanguageTool command line
+(=brew install languagetool=), in British English to match ispell.
+=M-x langtool-check= marks issues, =langtool-correct-buffer= steps
+through them with suggested fixes, and =langtool-check-done= clears the
+marks.
 
 #+begin_src emacs-lisp
 (use-package langtool
   :custom
-  (langtool-bin "/opt/homebrew/languagetool"))
+  (langtool-bin "/opt/homebrew/bin/languagetool")
+  (langtool-default-language "en-GB"))
 #+end_src
 
 * Version control
