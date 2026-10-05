@@ -391,6 +391,7 @@ In-buffer completion popup, enabled globally with no idle delay.
   (company-idle-delay 0)
   (company-dabbrev-downcase nil "Don't downcase returned candidates.")
   (company-tooltip-limit 10)
+  (company-show-quick-access t "Number the candidates for M-<digit> selection.")
   :config
   (global-company-mode 1))
 
@@ -582,9 +583,10 @@ marks.
 *** ESP-IDF / PlatformIO clangd
 
 Inside ESP-IDF (=sdkconfig=) or PlatformIO (=platformio.ini=) projects,
-uses Espressif's clangd, which supports the Xtensa and RISC-V targets,
-and lets it query the PlatformIO cross-compilers. Other C/C++ projects
-use the clangd on =PATH=.
+uses the newest installed Espressif clangd, which supports the Xtensa
+and RISC-V targets, and lets it query the PlatformIO cross-compilers.
+Other C/C++ projects, or ESP projects without an Espressif clangd, use
+the clangd on =PATH=.
 
 #+begin_src emacs-lisp
 (defun my/esp-project-p ()
@@ -593,14 +595,19 @@ use the clangd on =PATH=.
     (or (locate-dominating-file dir "sdkconfig")
         (locate-dominating-file dir "platformio.ini"))))
 
+(defun my/esp-clangd ()
+  "Return the newest installed Espressif clangd, or nil if there is none."
+  (car (last (sort (file-expand-wildcards
+                    "~/.espressif/tools/esp-clang/*/esp-clang/bin/clangd" t)
+                   #'string-version-lessp))))
+
 (defun my/c-mode-setup ()
   "Point clangd at Espressif's build and toolchains in ESP projects."
-  (when (my/esp-project-p)
+  (when-let* (((my/esp-project-p))
+              (clangd (my/esp-clangd)))
     ;; Defines the clangd options; this hook runs before lsp-mode loads.
     (require 'lsp-clangd)
-    (setq-local lsp-clients-clangd-executable
-                (expand-file-name
-                 "~/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd"))
+    (setq-local lsp-clients-clangd-executable clangd)
     (setq-local lsp-clients-clangd-args
                 (append lsp-clients-clangd-args
                         (list (concat "--query-driver="
@@ -764,27 +771,30 @@ loading pdf-tools until the first PDF is opened.
 (use-package markdown-mode
   :mode ("\\.md\\'" . markdown-mode)
   :custom
-  (markdown-command "pandoc --standalone --mathjax"))
+  (markdown-command "pandoc --standalone --mathjax")
+  :config
+  (define-key markdown-mode-map (kbd "C-c C-c l") #'my/markdown-preview-toggle))
 #+end_src
 
 *** Live preview via impatient-mode + pandoc
 
-Serves markdown buffers over a local HTTP server, rendered to HTML by
-pandoc with MathJax, and shows the live preview in an =xwidget-webkit=
-side window. Falls back to =browse-url= on builds without xwidget
-support.
+=C-c C-c l= (=my/markdown-preview-toggle=, in place of markdown-mode's
+eww-based live preview) serves the buffer over a local HTTP server,
+rendered to HTML by pandoc with MathJax, and updates the page on every
+change. The preview opens in an =xwidget-webkit= side window, or in the
+external browser on builds without xwidget support. Toggling it off
+stops serving the buffer, closes the xwidget window, and stops the
+server once no buffer is being served.
 
 #+begin_src emacs-lisp
 (use-package simple-httpd)
 (use-package impatient-mode)
 
 (defun my/browse-url-in-emacs (url)
-  "Open URL in an xwidget-webkit buffer, or externally without xwidget support.
-Return non-nil if it opened in Emacs."
+  "Open URL in an xwidget-webkit buffer, or externally without xwidget support."
   (if (featurep 'xwidget-internal)
-      (progn (xwidget-webkit-browse-url url) t)
-    (browse-url url)
-    nil))
+      (xwidget-webkit-browse-url url)
+    (browse-url url)))
 
 (defun my/imp-markdown-filter (buffer)
   "Print BUFFER's markdown rendered to standalone HTML by pandoc."
@@ -802,29 +812,47 @@ Return non-nil if it opened in Emacs."
   (format "http://localhost:%d/imp/live/%s/"
           httpd-port (url-hexify-string (buffer-name))))
 
-(defun my/imp-preview-in-emacs ()
-  "Show this buffer's impatient preview in an xwidget beside it.
-Falls back to the external browser on builds without xwidget support."
-  (interactive)
-  (let ((source (current-buffer)))
-    (when (my/browse-url-in-emacs (my/imp-live-url))
-      ;; Restore the source buffer and show the preview in a side window.
+(defvar-local my/imp-preview-buffer nil
+  "The xwidget buffer showing this buffer's preview, if any.")
+
+(defun my/imp-show-preview ()
+  "Open the current buffer's preview and return its xwidget buffer.
+The xwidget is shown in a side window. Without xwidget support the
+preview opens in the external browser and the return value is nil."
+  (let ((source (current-buffer))
+        (url (my/imp-live-url)))
+    (if (not (featurep 'xwidget-internal))
+        (progn (browse-url url) nil)
+      ;; A new session per preview, so each source buffer gets its own.
+      (xwidget-webkit-browse-url url t)
       (let ((preview (current-buffer)))
         (switch-to-buffer source)
         (display-buffer preview
                         '(display-buffer-in-side-window
                           (side . right)
-                          (window-width . 0.5)))))))
+                          (window-width . 0.5)))
+        preview))))
 
-(defun my/impatient-markdown ()
-  "Serve the current markdown buffer through impatient-mode and preview it."
-  (unless (httpd-running-p)
-    (httpd-start))
-  (impatient-mode 1)
-  (imp-set-user-filter #'my/imp-markdown-filter)
-  (my/imp-preview-in-emacs))
-
-(add-hook 'markdown-mode-hook #'my/impatient-markdown)
+(defun my/markdown-preview-toggle ()
+  "Toggle the live HTML preview of the current markdown buffer."
+  (interactive)
+  (if impatient-mode
+      (progn
+        (impatient-mode -1)
+        (when (buffer-live-p my/imp-preview-buffer)
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer my/imp-preview-buffer)))
+        (setq my/imp-preview-buffer nil)
+        (unless (seq-some (lambda (buf) (buffer-local-value 'impatient-mode buf))
+                          (buffer-list))
+          (httpd-stop))
+        (message "Markdown preview off"))
+    (unless (httpd-running-p)
+      (httpd-start))
+    (impatient-mode 1)
+    (imp-set-user-filter #'my/imp-markdown-filter)
+    (setq my/imp-preview-buffer (my/imp-show-preview))
+    (message "Markdown preview on")))
 #+end_src
 
 *** Scrolling the impatient preview with normal keys
