@@ -1136,7 +1136,7 @@ Global keybindings.
 
 ;; Delete the previous word, stopping at the start of the line
 (global-set-key (kbd "s-<backspace>") #'my-backwards-kill-word-on-line)
-(global-set-key (kbd "C-<backnspace>") #'my-backwards-kill-word-on-line)
+(global-set-key (kbd "C-<backspace>") #'my-backwards-kill-word-on-line)
 
 ;; Spell-check the word at point
 (global-set-key (kbd "M-c") #'ispell-word)
