@@ -1269,27 +1269,35 @@ art intact."
 
 ** Banner shimmer
 
-Each time the start page is drawn, a band of light sweeps across the
-banner a couple of times, then the banner settles on its usual colour.
+While the start page is on screen, a band of light sweeps across the
+banner every few seconds. The loop stops as soon as the page is
+hidden, so it costs nothing while you work, and starts again when the
+page is shown.
 
 The banner text is tagged with a =my/enlight-banner= property in
 =my/enlight-build=. After enlight inserts its content, every tagged
 character gets its own overlay, and a timer recolours those overlays
 about 30 times a second. Overlays sit on top of the text without
-modifying it, so the read only buffer is never touched and finishing
+modifying it, so the read only buffer is never touched and stopping
 is just deleting them. They also evaporate if enlight redraws the
-buffer, which ends a shimmer that is still running.
+buffer, and the redraw starts a fresh shimmer.
 
 The band's position comes from the time elapsed rather than a frame
-counter, so its speed stays steady even when Emacs is busy at startup
-and some frames run late.
+counter, so its speed stays steady even when some frames run late.
+During the rest between sweeps the band sits past the right edge, and
+frames that would draw the same picture are skipped.
+
+Each tick checks whether any window still shows the page and stops
+if none does. A buffer local =window-buffer-change-functions= hook,
+which Emacs runs when a window starts showing the buffer, restarts
+it.
 
 #+begin_src emacs-lisp
 (require 'color)
 (require 'cl-lib)
 
-(defvar my/enlight-shimmer-passes 2
-  "How many times the band sweeps across the banner.")
+(defvar my/enlight-shimmer-rest 4
+  "Seconds of rest between sweeps.")
 (defvar my/enlight-shimmer-speed 40
   "Speed of the band, in columns per second.")
 (defvar my/enlight-shimmer-radius 6
@@ -1303,6 +1311,8 @@ the text colour, from 0 to 1.")
 (defvar my/enlight--shimmer-timer nil)
 (defvar my/enlight--shimmer-cells nil
   "Overlays on the banner, each paired with its column.")
+(defvar my/enlight--shimmer-centre nil
+  "Band centre of the last frame drawn, to skip identical frames.")
 
 (defun my/enlight--mix (from to amount)
   "Blend the RGB list FROM toward TO by AMOUNT, from 0 to 1, as hex."
@@ -1342,33 +1352,40 @@ banner's left edge."
     (cancel-timer my/enlight--shimmer-timer)
     (setq my/enlight--shimmer-timer nil))
   (mapc (lambda (cell) (delete-overlay (car cell))) my/enlight--shimmer-cells)
-  (setq my/enlight--shimmer-cells nil))
+  (setq my/enlight--shimmer-cells nil
+        my/enlight--shimmer-centre nil))
 
 (defun my/enlight--shimmer-frame (base text start)
   "Draw one frame, blending the BASE colour toward TEXT inside the band.
-START is when the first pass began."
+START is when the first sweep began."
   (let* ((cells my/enlight--shimmer-cells)
-         (span (+ 1 (apply #'max (mapcar #'cdr cells))
-                  (* 2 my/enlight-shimmer-radius)))
-         (travelled (max 0 (* my/enlight-shimmer-speed
-                              (float-time (time-since start)))))
-         (centre (- (mod travelled span) my/enlight-shimmer-radius)))
-    (if (or (>= travelled (* span my/enlight-shimmer-passes))
-            (not (overlay-buffer (caar cells))))
+         (buffer (overlay-buffer (caar cells))))
+    (if (not (and buffer (get-buffer-window buffer t)))
         (my/enlight-shimmer-stop)
-      (pcase-dolist (`(,ov . ,col) cells)
-        (overlay-put ov 'face
-                     (list :foreground
-                           (my/enlight--mix base text
-                                            (* my/enlight-shimmer-strength
-                                               (my/enlight--band
-                                                (abs (- col centre)))))))))))
+      (let* ((span (+ 1 (apply #'max (mapcar #'cdr cells))
+                      (* 2 my/enlight-shimmer-radius)))
+             (cycle (+ (/ (float span) my/enlight-shimmer-speed)
+                       my/enlight-shimmer-rest))
+             (elapsed (max 0 (float-time (time-since start))))
+             (travelled (min span (* my/enlight-shimmer-speed
+                                     (mod elapsed cycle))))
+             (centre (- travelled my/enlight-shimmer-radius)))
+        (unless (eql centre my/enlight--shimmer-centre)
+          (setq my/enlight--shimmer-centre centre)
+          (pcase-dolist (`(,ov . ,col) cells)
+            (overlay-put ov 'face
+                         (list :foreground
+                               (my/enlight--mix base text
+                                                (* my/enlight-shimmer-strength
+                                                   (my/enlight--band
+                                                    (abs (- col centre)))))))))))))
 
 (defun my/enlight-shimmer ()
-  "Sweep a band of light across the banner in the current buffer.
+  "Loop a band of light across the banner in the current buffer.
 The band blends the keyword colour toward the default text colour.
 Nothing happens when either colour is unknown, as on some terminals."
   (my/enlight-shimmer-stop)
+  (add-hook 'window-buffer-change-functions #'my/enlight--shimmer-resume nil t)
   (let* ((base (color-name-to-rgb
                 (face-foreground 'font-lock-keyword-face nil t)))
          (text (color-name-to-rgb (face-foreground 'default nil t))))
@@ -1380,6 +1397,12 @@ Nothing happens when either colour is unknown, as on some terminals."
                               #'my/enlight--shimmer-frame
                               base text
                               (time-add nil my/enlight-shimmer-delay)))))))
+
+(defun my/enlight--shimmer-resume (window)
+  "Restart the shimmer when WINDOW starts showing the start page."
+  (unless my/enlight--shimmer-timer
+    (with-current-buffer (window-buffer window)
+      (my/enlight-shimmer))))
 
 (add-hook 'enlight-after-insert-hook #'my/enlight-shimmer)
 #+end_src
