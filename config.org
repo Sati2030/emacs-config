@@ -303,6 +303,16 @@ Puts auto-save and backup files in one place, and disables lock files.
 (setq create-lockfiles nil)
 #+end_src
 
+** Recent files
+
+Remembers recently opened files across sessions, which feeds
+=counsel-recentf= and the start page's "Recent files" entry.
+
+#+begin_src emacs-lisp
+(setq recentf-max-saved-items 200)
+(recentf-mode 1)
+#+end_src
+
 ** Remote (TRAMP) save performance
 
 Reduces the remote calls made per save over TRAMP. Each call blocks the
@@ -1111,36 +1121,147 @@ moving point."
 
 * Start page
 
-Replaces the default startup screen with an =enlight= dashboard of
-project directories.
+Replaces the default startup screen with an =enlight= dashboard: a
+banner, today's date with the current QUT teaching week, and menus laid
+out side by side.
+
+** Semester calendar
+
+Dates for the current semester, taken from the QUT academic calendar.
+Update these four values at the start of each semester and the start
+page works out the week by itself. Break weeks are skipped when
+counting, so the number matches QUT's own week numbering.
+
+#+begin_src emacs-lisp
+(defvar my/qut-semester-name "Semester 2")
+(defvar my/qut-week-1 '(2026 7 27))
+(defvar my/qut-break-weeks '((2026 9 7)))
+(defvar my/qut-semester-end '(2026 11 14))
+(defvar my/qut-teaching-weeks 13)
+
+(defun my/qut--days (date)
+  "Turn DATE, a (YEAR MONTH DAY) list, into an absolute day number."
+  (pcase-let ((`(,y ,m ,d) date))
+    (time-to-days (encode-time (list 0 0 12 d m y nil -1 nil)))))
+
+(defun my/qut-week-label ()
+  "Describe where today sits in the semester, or nil outside it."
+  (let* ((today (time-to-days (current-time)))
+         (start (my/qut--days my/qut-week-1))
+         (breaks (mapcar #'my/qut--days my/qut-break-weeks))
+         (in-break (seq-find (lambda (b) (<= b today (+ b 6))) breaks))
+         (breaks-before (seq-count (lambda (b) (< (+ b 6) today)) breaks))
+         (week (- (1+ (/ (- today start) 7)) breaks-before)))
+    (cond ((or (< today start)
+               (> today (my/qut--days my/qut-semester-end)))
+           nil)
+          (in-break "mid semester break")
+          ((<= week my/qut-teaching-weeks) (format "week %d" week))
+          (t "study and exams"))))
+#+end_src
+
+** Dashboard
+
+=grid= (by the author of =enlight=) places several menus in one row,
+so all groups fit on screen at once. It is not on MELPA, hence =:vc=.
+
+=enlight-content= is a plain string, so anything computed in it (the
+date, the week) is frozen at the moment it is set. =my/enlight=
+rebuilds it before showing the buffer, which keeps the header current
+both at startup and when reopened with =M-x my/enlight-open=.
+
+Keys: lowercase opens a unit's documents in =~/Documents/QUT=, the
+matching uppercase opens its code in =~/dev/QUT=.
 
 #+begin_src emacs-lisp
 (setq inhibit-startup-screen t)
 
-(use-package enlight
-  :custom
-  (enlight-content
-   (concat
-    (propertize "MENU" 'face 'highlight)
-    "\n"
-    (enlight-menu
-     '(("QUT"
-        ("QUT"                              (dired "~/Documents/QUT")                    "q")
-        ("CAB420 - Machine Learning"        (dired "~/Documents/QUT/CAB420")             "m")
-        ("CAB301 - Algorithms & Complexity" (dired "~/Documents/QUT/CAB301")             "a")
-        ("IFB398 - Capstone"                (dired "~/Documents/QUT/IFB398")             "c")
-        ("IFB399 - Capstone repo"           (dired "~/dev/QUT/Capstone/Project_Kaizen") "r"))
-       ("CodeCrafters"
-        ("GIT"   (dired "~/Documents/CodeCrafters/git_Seiji")            "g")
-        ("SHELL" (dired "~/Documents/CodeCrafters/codecrafters-shell-c") "s"))
-       ("Nottingham"
-        ("All"                  (dired "~/Documents/Nottingham")          "n")
-        ("Software Engineering" (dired "~/Documents/Nottingham/COMP1003") "s"))
-       ("Others"
-        ("FullStack"    (dired "~/Documents/FullStack-Course") "f")
-        ("C++ learning" (dired "~/dev/Cpp")                    "p")))))))
+(use-package grid
+  :vc (:url "https://github.com/ichernyshovvv/grid.el" :rev :newest))
 
-(setopt initial-buffer-choice #'enlight)
+(use-package enlight
+  :commands enlight)
+
+(defconst my/enlight-banner
+  "  ___ _ __ ___   __ _  ___ ___
+ / _ \\ '_ ` _ \\ / _` |/ __/ __|
+|  __/ | | | | | (_| | (__\\__ \\
+ \\___|_| |_| |_|\\__,_|\\___|___/")
+
+(defun my/enlight-date-line ()
+  "Today's date, plus the semester week when inside a semester."
+  (let ((week (my/qut-week-label)))
+    (concat
+     (propertize (format-time-string "%A %-d %B") 'face 'bold)
+     (when week
+       (propertize (format "  ·  %s, %s" my/qut-semester-name week)
+                   'face 'font-lock-comment-face)))))
+
+(defun my/enlight--center (text width)
+  "Indent every line of TEXT equally so the block is centred in WIDTH.
+A shared indent, rather than centring line by line, keeps the ASCII
+art intact."
+  (let* ((lines (split-string text "\n"))
+         (pad (make-string
+               (max 0 (/ (- width (seq-max (mapcar #'string-width lines))) 2))
+               ?\s)))
+    (mapconcat (lambda (line) (concat pad line)) lines "\n")))
+
+(defun my/enlight-menus ()
+  "The menu groups, each one a column of the dashboard."
+  (list
+   (enlight-menu
+    '(("This semester"
+       ("CAB403 docs" (dired "~/Documents/QUT/CAB403") "s")
+       ("CAB403 code" (dired "~/dev/QUT/CAB403")       "S")
+       ("CAB330 docs" (dired "~/Documents/QUT/CAB330") "d")
+       ("CAB330 code" (dired "~/dev/QUT/CAB330")       "D")
+       ("IAB353 docs" (dired "~/Documents/QUT/IAB353") "i")
+       ("IAB353 code" (dired "~/dev/QUT/IAB353")       "I"))))
+   (enlight-menu
+    '(("Capstone"
+       ("Project Kaizen"       (dired "~/dev/QUT/Capstone/Project_Kaizen")        "k")
+       ("Project Kaizen magit" (magit-status "~/dev/QUT/Capstone/Project_Kaizen") "K")
+       ("Capstone workspace"   (dired "~/dev/QUT/Capstone")                       "c")
+       ("IFB398 docs"          (dired "~/Documents/QUT/IFB398")                   "8")
+       ("IFB399 docs"          (dired "~/Documents/QUT/IFB399")                   "9"))))
+   (enlight-menu
+    '(("Actions"
+       ("Recent files"   counsel-recentf                     "r")
+       ("Switch project" counsel-projectile-switch-project   "p")
+       ("Edit config"    (find-file "~/.emacs.d/config.org") "e"))
+      ("Other"
+       ("QUT"              (dired "~/Documents/QUT")                    "q")
+       ("CodeCrafters GIT" (dired "~/Documents/CodeCrafters/git_Seiji") "g"))))))
+
+(defun my/enlight-build ()
+  "Assemble the banner, the date line and the menu row into one string."
+  (require 'grid)
+  (require 'enlight)
+  (require 'enlight-menu)
+  (let* ((menus (grid-make-row
+                 (mapcar (lambda (menu) (list :content menu :padding '(0 3)))
+                         (my/enlight-menus))))
+         (width (seq-max (mapcar #'string-width (split-string menus "\n")))))
+    (concat
+     (my/enlight--center
+      (propertize my/enlight-banner 'face 'font-lock-keyword-face) width)
+     "\n\n"
+     (my/enlight--center (my/enlight-date-line) width)
+     "\n\n\n"
+     menus)))
+
+(defun my/enlight ()
+  "Rebuild `enlight-content', then return the enlight buffer."
+  (setopt enlight-content (my/enlight-build))
+  (enlight))
+
+(defun my/enlight-open ()
+  "Show the start page in the current window."
+  (interactive)
+  (pop-to-buffer-same-window (my/enlight)))
+
+(setopt initial-buffer-choice #'my/enlight)
 #+end_src
 
 * Claude
