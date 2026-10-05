@@ -1203,10 +1203,35 @@ moving point."
 * Claude
 #+begin_src emacs-lisp
 
+;; Terminal backend for Claude sessions, built on Ghostty's VT engine. Its
+;; native module is downloaded from the GitHub releases on first use.
+(use-package ghostel
+  :defer t
+  :custom
+  (ghostel-module-auto-install 'download)
+  :config
+  ;; Scroll the window like the trackpad does. ghostel only re-anchors the
+  ;; view to the live cursor once it is scrolled back to the bottom.
+  (defun my/ghostel-scroll-up-5 ()
+    (interactive)
+    (scroll-down 5))
+  (defun my/ghostel-scroll-down-5 ()
+    (interactive)
+    (scroll-up 5))
+
+  ;; Bound in `ghostel-mode-map', the parent of every input mode map, because
+  ;; ghostel rebuilds `ghostel-semi-char-mode-map' from scratch.
+  (define-key ghostel-mode-map (kbd "s-p") #'my/ghostel-scroll-up-5)
+  (define-key ghostel-mode-map (kbd "s-n") #'my/ghostel-scroll-down-5)
+  ;; Sends M-DEL, which the Claude CLI treats as backward-kill-word.
+  (define-key ghostel-mode-map (kbd "s-<backspace>")
+              (lambda () (interactive) (ghostel-send-key "backspace" "meta"))))
+
 (use-package claude-code-ide
   :vc (:url "https://github.com/manzaltu/claude-code-ide.el" :rev :newest)
   :bind ("C-c C-" . claude-code-ide-menu)
   :custom
+  (claude-code-ide-terminal-backend 'ghostel)
   ;; Disable the reflow workaround. It leaves libvterm and the PTY with
   ;; mismatched sizes, which corrupts the Claude TUI when the window height
   ;; changes.
