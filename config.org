@@ -1219,6 +1219,8 @@ with the Emacs MCP tools enabled.
   :bind ("C-c C-'" . claude-code-ide-menu)
   :custom
   (claude-code-ide-terminal-backend 'ghostel)
+  ;; Diffs get their own frame, so the Claude window stays put in the main one.
+  (claude-code-ide-show-claude-window-in-ediff nil)
   :init
   (defalias 'claude #'claude-code-ide-menu)
   :config
@@ -1236,6 +1238,86 @@ with the Emacs MCP tools enabled.
                   ("resources/templates/list" '((resourceTemplates . [])))
                   ("prompts/list" '((prompts . [])))
                   (_ (funcall orig method params)))))
+
+  ;; Review diffs in a new frame. The openDiff handler builds ediff in the
+  ;; selected frame, so selecting a fresh frame first is enough. The tab
+  ;; switch is skipped because it would look for Claude's tab in the new
+  ;; frame. The frame is tagged after the handler returns, since the handler
+  ;; first cleans up any older diff with the same tab name, and it is deleted
+  ;; if the handler exits any other way, including C-g.
+  ;;
+  ;; The diff frame fills the left half of the screen. Frame size parameters
+  ;; measure the text area only, so the title bar and fringes are subtracted
+  ;; to keep the minibuffer, where the accept prompt appears, on screen.
+  ;; The frame it was opened from is remembered so focus can return there.
+  (defun my/claude-diff-make-frame ()
+    (pcase-let* ((`(,x ,y ,width ,height) (frame-monitor-workarea))
+                 (frame (make-frame `((name . "Claude diff")
+                                      (fullscreen . nil)
+                                      (my/claude-diff-origin . ,(selected-frame))))))
+      (set-frame-position frame x y)
+      (set-frame-size frame
+                      (- (/ width 2) (- (frame-outer-width frame) (frame-text-width frame)))
+                      (- height (- (frame-outer-height frame) (frame-text-height frame)))
+                      t)
+      frame))
+
+  ;; Claude writes accepted edits straight to disk, which leaves the file's
+  ;; buffer stale. The handler would then stop on a "Reread from disk?"
+  ;; prompt, so a stale buffer without unsaved edits is reverted first.
+  (defun my/claude-diff-in-new-frame (orig arguments &optional session)
+    (let ((buffer (find-buffer-visiting (alist-get 'old_file_path arguments)))
+          (opened nil)
+          frame)
+      (when (and buffer
+                 (not (buffer-modified-p buffer))
+                 (not (verify-visited-file-modtime buffer)))
+        (with-current-buffer buffer
+          (revert-buffer t t t)))
+      (setq frame (my/claude-diff-make-frame))
+      (select-frame-set-input-focus frame)
+      (unwind-protect
+          (prog1 (let ((claude-code-ide-switch-tab-on-ediff nil))
+                   (funcall orig arguments session))
+            (setq opened t)
+            (set-frame-parameter frame 'my/claude-diff
+                                 (cons session (alist-get 'tab_name arguments))))
+        (unless opened
+          (my/claude-diff-close-frame frame)))))
+
+  ;; Deleting a frame only changes the selected frame inside Emacs, and macOS
+  ;; leaves the remaining frame unfocused with a hollow cursor, so focus is
+  ;; handed back explicitly.
+  (defun my/claude-diff-close-frame (frame)
+    (let ((origin (frame-parameter frame 'my/claude-diff-origin)))
+      (delete-frame frame)
+      (when (frame-live-p origin)
+        (select-frame-set-input-focus origin))))
+
+  (defun my/claude-diff-frame (tab-name session)
+    (seq-find (lambda (frame)
+                (let ((tag (frame-parameter frame 'my/claude-diff)))
+                  (and (eq (car tag) session) (equal (cdr tag) tab-name))))
+              (frame-list)))
+
+  ;; Quitting ediff with q leaves its control panel alive, so when Claude
+  ;; then sends close_tab the handler quits ediff a second time, and that
+  ;; quit splits the selected frame. Running close_tab with the diff frame
+  ;; selected keeps those splits off the main frame.
+  (defun my/claude-diff-close-in-frame (orig arguments &optional session)
+    (if-let* ((frame (my/claude-diff-frame (alist-get 'tab_name arguments) session)))
+        (with-selected-frame frame
+          (funcall orig arguments session))
+      (funcall orig arguments session)))
+
+  ;; Every way a diff ends goes through cleanup-diff, last of all.
+  (defun my/claude-diff-delete-frame (tab-name session)
+    (when-let* ((frame (my/claude-diff-frame tab-name session)))
+      (my/claude-diff-close-frame frame)))
+
+  (advice-add 'claude-code-ide-mcp-handle-open-diff :around #'my/claude-diff-in-new-frame)
+  (advice-add 'claude-code-ide-mcp-handle-close-tab :around #'my/claude-diff-close-in-frame)
+  (advice-add 'claude-code-ide-mcp--cleanup-diff :after #'my/claude-diff-delete-frame)
 
   (claude-code-ide-emacs-tools-setup))
 #+end_src
