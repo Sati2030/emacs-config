@@ -1270,9 +1270,11 @@ art intact."
 ** Banner shimmer
 
 While the start page is the selected window, a band of light sweeps
-across the banner every few seconds. As soon as you select another
-window, or hide the page, the loop stops, so it costs nothing while
-you work. It starts again when the page is selected.
+across the banner every few seconds. The minibuffer counts as being
+on the page when it was opened from there, so =C-x C-f= or =M-x= on
+the start page keeps it going. As soon as you select another window,
+or hide the page, the loop stops, so it costs nothing while you work.
+It starts again when the page is selected.
 
 The banner text is tagged with a =my/enlight-banner= property in
 =my/enlight-build=. After enlight inserts its content, every tagged
@@ -1387,8 +1389,13 @@ from the banner's left edge and every step starting at 0."
         my/enlight--shimmer-centre nil))
 
 (defun my/enlight--shimmer-selected-p (buffer)
-  "Non-nil when BUFFER is live and shown in the selected window."
-  (and buffer (eq (window-buffer (selected-window)) buffer)))
+  "Non-nil when BUFFER is live and shown in the selected window.
+When the minibuffer is active, the window it was opened from counts."
+  (and buffer
+       (eq (window-buffer (if (minibufferp (window-buffer (selected-window)))
+                              (minibuffer-selected-window)
+                            (selected-window)))
+           buffer)))
 
 (defun my/enlight--shimmer-frame (faces span cycle start)
   "Draw one frame using the step FACES.
@@ -1440,13 +1447,316 @@ Nothing happens when either colour is unknown, as on some terminals."
                                 (time-add nil my/enlight-shimmer-delay))))))))
 
 (defun my/enlight--shimmer-resume (window)
-  "Restart the shimmer when WINDOW, showing the start page, is selected."
+  "Restart the shimmer when WINDOW, showing the start page, is selected.
+Emacs also runs this when WINDOW stops showing the page, so check
+that the page is still there."
   (when (and (not my/enlight--shimmer-timer)
              (eq window (selected-window)))
     (with-current-buffer (window-buffer window)
-      (my/enlight-shimmer))))
+      (when (derived-mode-p 'enlight-mode)
+        (my/enlight-shimmer)))))
 
 (add-hook 'enlight-after-insert-hook #'my/enlight-shimmer)
+#+end_src
+
+** Matrix rain
+
+Green code falls down the start page behind the dashboard, in the
+style of the film's "digital rain".
+
+Emacs has no layers: each screen cell is a buffer character or
+nothing. So the rain is drawn only into the empty parts of the page,
+and the dashboard wins wherever it has text, which reads as the rain
+passing behind it. Every frame recolours a few overlays, again
+without touching the read only buffer:
+
+- runs of spaces get a =display= string of the same width, made of
+  rain characters,
+- past the end of each line, a =before-string= fills the row up to
+  the window's edge, and the last line's one also carries the rows
+  below the content,
+- the left margin is the tricky part. enlight centres the page with a
+  =line-prefix= stretch, which is not text and cannot be drawn into,
+  so while the rain runs that prefix is turned off and each line gets
+  a margin string of the same width instead.
+
+Gaps narrower than =my/enlight-rain-min-gap= stay blank, as does the
+gap between a menu label and its key, so words, the banner and the
+menus stay readable.
+
+Each column holds one drop: a head moving down at its own speed with
+a trail that fades into the background. A drop that has fallen off
+the bottom comes back above the top after a random pause, which
+keeps the columns out of step. Every cell keeps its character between
+frames, so the trail looks like code being revealed, and a few cells
+change each frame to make the glyphs flicker.
+
+The layout depends on the window size, so each frame compares the
+size with the one the overlays were built for and rebuilds them when
+it changed. Like the shimmer, the loop stops when no window shows the
+page. Its overlays are kept, so the page looks the same until the
+loop starts again.
+
+#+begin_src emacs-lisp
+(defvar my/enlight-rain-enabled t
+  "Non-nil means draw falling code behind the start page.")
+(defvar my/enlight-rain-fps 20
+  "Frames per second.")
+(defvar my/enlight-rain-speed '(6 . 18)
+  "Slowest and fastest drop speeds, in rows per second.")
+(defvar my/enlight-rain-colour "#00ff41"
+  "Colour of the trails.")
+(defvar my/enlight-rain-head-colour "#d8ffd8"
+  "Colour of the character leading each trail.")
+(defvar my/enlight-rain-strength 0.5
+  "How far a trail's brightest shade moves from the background toward
+`my/enlight-rain-colour', from 0 to 1. Lower keeps the page readable.")
+(defvar my/enlight-rain-head-strength 0.8
+  "Like `my/enlight-rain-strength', for the leading character.")
+(defvar my/enlight-rain-levels 8
+  "Number of shades a trail fades through.")
+(defvar my/enlight-rain-glitch 0.01
+  "Share of the characters swapped every frame.")
+(defvar my/enlight-rain-min-gap 4
+  "Gaps inside a line narrower than this stay blank.")
+(defvar my/enlight-rain-chars
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$+-*/=%\"'#&_(),.;:?!|{}<>[]^~"
+  "Characters the rain is made of. Every one must be one column wide.")
+(defvar my/enlight-rain-delay 0.3
+  "Seconds to wait before starting, so the frame is on screen first.")
+
+(defvar my/enlight--rain-timer nil)
+(defvar my/enlight--rain-buffer nil)
+(defvar my/enlight--rain-overlays nil
+  "Every overlay the rain owns.")
+(defvar my/enlight--rain-segments nil
+  "Lists of (OVERLAY PROPERTY ROW COLUMN WIDTH BELOW). The OVERLAY's
+PROPERTY shows WIDTH columns of ROW from COLUMN, then BELOW whole rows
+under it.")
+(defvar my/enlight--rain-size nil
+  "(COLUMNS . ROWS) of the window the overlays were built for.")
+(defvar my/enlight--rain-grid nil
+  "Character of every cell, row after row.")
+(defvar my/enlight--rain-drops nil
+  "One [HEAD SPEED LENGTH] vector per column. HEAD is a row, and may
+be fractional or above the top edge.")
+(defvar my/enlight--rain-faces nil
+  "Trail shades, dimmest first.")
+(defvar my/enlight--rain-head-face nil)
+(defvar my/enlight--rain-time nil
+  "When the last frame was drawn.")
+
+(defun my/enlight--rain-random-char ()
+  (aref my/enlight-rain-chars (random (length my/enlight-rain-chars))))
+
+(defun my/enlight--rain-new-drop (rows &optional anywhere)
+  "A drop for a screen ROWS tall, waiting above the top edge.
+With ANYWHERE it may start part way down instead, so the first frame
+is already full of rain."
+  (pcase-let ((`(,slow . ,fast) my/enlight-rain-speed))
+    (vector (float (- (random (* rows (if anywhere 2 1))) rows))
+            (+ slow (* (- fast slow) (/ (random 1000) 1000.0)))
+            (+ 4 (random (max 1 (/ rows 2)))))))
+
+(defun my/enlight--rain-make-faces ()
+  "Compute the shades from the current theme.
+Return nil when the background colour is unknown, as on some
+terminals."
+  (let ((bg (color-name-to-rgb (face-background 'default nil t)))
+        (rain (color-name-to-rgb my/enlight-rain-colour))
+        (head (color-name-to-rgb my/enlight-rain-head-colour)))
+    (when (and bg rain head)
+      (setq my/enlight--rain-head-face
+            (list :foreground
+                  (my/enlight--mix bg head my/enlight-rain-head-strength))
+            my/enlight--rain-faces
+            (vconcat
+             (cl-loop for i from 1 to my/enlight-rain-levels
+                      collect (list :foreground
+                                    (my/enlight--mix
+                                     bg rain
+                                     (* my/enlight-rain-strength
+                                        (/ (float i) my/enlight-rain-levels)))))))
+      t)))
+
+(defun my/enlight--rain-line-segments (row margin cols)
+  "Make the overlays for the line at point, shown on screen ROW.
+MARGIN is the width of the left margin and COLS the window's width.
+Return the segments with the line's last one first."
+  (let* ((bol (line-beginning-position))
+         (eol (line-end-position))
+         (edge (1- cols))
+         (runs (save-excursion
+                 (cl-loop while (re-search-forward " +" eol t)
+                          collect (cons (match-beginning 0) (match-end 0)))))
+         (column (lambda (pos) (+ margin (- pos bol))))
+         segments)
+    (cl-flet ((add (start end prop col width)
+                ;; Clamped, so a line wider than the window can't index
+                ;; past the last column.
+                (let ((ov (make-overlay start end)))
+                  (push ov my/enlight--rain-overlays)
+                  (push (list ov prop row col
+                              (max 0 (min width (- edge col)))
+                              0)
+                        segments))))
+      (if (or (= bol eol) (equal runs (list (cons bol eol))))
+          ;; Blank line: a single segment across the whole row.
+          (add bol eol (if (= bol eol) 'before-string 'display) 0 edge)
+        ;; Margin, swallowing the line's leading spaces.
+        (if (eql (caar runs) bol)
+            (let ((run (pop runs)))
+              (add bol (cdr run) 'display 0 (funcall column (cdr run))))
+          (when (> margin 0)
+            (add bol bol 'before-string 0 margin)))
+        (let ((tail (car (last runs))))
+          (unless (eql (cdr tail) eol)
+            (setq tail nil))
+          ;; Wide gaps, except the one before a menu key.
+          (dolist (run runs)
+            (unless (or (eq run tail)
+                        (< (- (cdr run) (car run)) my/enlight-rain-min-gap)
+                        (eq (get-text-property (cdr run) 'face)
+                            'enlight-menu-key))
+              (add (car run) (cdr run) 'display (funcall column (car run))
+                   (- (cdr run) (car run)))))
+          ;; Everything right of the text, up to the window's edge.
+          (let ((start (if tail (car tail) eol)))
+            (add start eol (if tail 'display 'before-string)
+                 (funcall column start)
+                 (- edge (funcall column start)))))))
+    segments))
+
+(defun my/enlight--rain-layout (size)
+  "Rebuild the overlays and the rain for a window of SIZE, given as
+(COLUMNS . ROWS)."
+  (mapc #'delete-overlay my/enlight--rain-overlays)
+  (setq my/enlight--rain-overlays nil
+        my/enlight--rain-segments nil
+        my/enlight--rain-size size)
+  ;; Margins are drawn as rain from here on, and truncating means an
+  ;; overlong line can never wrap and push the rows below out of step.
+  (setq-local line-prefix nil)
+  (setq-local truncate-lines t)
+  (pcase-let* ((`(,cols . ,rows) size)
+               (margin (max 0 (/ (- cols (or enlight-width 0)) 2)))
+               (row 0))
+    (save-excursion
+      (goto-char (point-min))
+      (while (< row rows)
+        (let ((line (my/enlight--rain-line-segments row margin cols)))
+          (setq my/enlight--rain-segments
+                (nconc line my/enlight--rain-segments)
+                row (1+ row))
+          (if (< (line-end-position) (point-max))
+              (forward-line 1)
+            ;; Out of lines: the last segment also fills the rows below.
+            (setf (nth 5 (car line)) (- rows row))
+            (setq row rows)))))
+    (setq my/enlight--rain-grid
+          (vconcat (cl-loop repeat (* cols rows)
+                            collect (my/enlight--rain-random-char)))
+          my/enlight--rain-drops
+          (vconcat (cl-loop repeat cols
+                            collect (my/enlight--rain-new-drop rows t))))))
+
+(defun my/enlight--rain-step (seconds)
+  "Move every drop on by SECONDS and flicker a few characters."
+  (let ((rows (cdr my/enlight--rain-size))
+        (grid my/enlight--rain-grid))
+    (dotimes (col (length my/enlight--rain-drops))
+      (let ((drop (aref my/enlight--rain-drops col)))
+        (aset drop 0 (+ (aref drop 0) (* seconds (aref drop 1))))
+        (when (> (- (aref drop 0) (aref drop 2)) rows)
+          (aset my/enlight--rain-drops col (my/enlight--rain-new-drop rows)))))
+    (dotimes (_ (ceiling (* my/enlight-rain-glitch (length grid))))
+      (aset grid (random (length grid)) (my/enlight--rain-random-char)))))
+
+(defun my/enlight--rain-row (row col width)
+  "WIDTH columns of rain on screen ROW, starting at column COL."
+  (let ((text (make-string width ?\s t))
+        (cols (car my/enlight--rain-size))
+        (levels (length my/enlight--rain-faces)))
+    (dotimes (i width)
+      (let* ((c (+ col i))
+             (drop (aref my/enlight--rain-drops c))
+             (behind (- (aref drop 0) row))
+             (length (aref drop 2)))
+        (when (and (>= behind 0) (< behind length))
+          (aset text i (aref my/enlight--rain-grid (+ (* row cols) c)))
+          (put-text-property
+           i (1+ i) 'face
+           (if (< behind 1)
+               my/enlight--rain-head-face
+             (aref my/enlight--rain-faces
+                   (min (1- levels)
+                        (floor (* levels (- 1 (/ behind length)))))))
+           text))))
+    text))
+
+(defun my/enlight--rain-paint ()
+  "Put the current frame into the overlays."
+  (let ((edge (1- (car my/enlight--rain-size))))
+    (pcase-dolist (`(,ov ,prop ,row ,col ,width ,below)
+                   my/enlight--rain-segments)
+      (overlay-put ov prop
+                   (apply #'concat
+                          (my/enlight--rain-row row col width)
+                          (cl-loop for k from 1 to below
+                                   collect "\n"
+                                   collect (my/enlight--rain-row
+                                            (+ row k) 0 edge)))))))
+
+(defun my/enlight--rain-frame ()
+  "Advance and draw one frame, or stop when the page is hidden."
+  (let ((window (and (buffer-live-p my/enlight--rain-buffer)
+                     (get-buffer-window my/enlight--rain-buffer t))))
+    (if (not window)
+        (my/enlight-rain-stop)
+      (with-current-buffer my/enlight--rain-buffer
+        (let ((size (cons (window-body-width window)
+                          (window-body-height window)))
+              (now (current-time)))
+          (if (equal size my/enlight--rain-size)
+              ;; Capped, so a late frame doesn't jump the drops.
+              (my/enlight--rain-step
+               (min 0.2 (float-time (time-subtract now my/enlight--rain-time))))
+            (my/enlight--rain-layout size))
+          (setq my/enlight--rain-time now)
+          (my/enlight--rain-paint))))))
+
+(defun my/enlight-rain-stop ()
+  "Pause the rain. The last frame stays on the page."
+  (when my/enlight--rain-timer
+    (cancel-timer my/enlight--rain-timer)
+    (setq my/enlight--rain-timer nil)))
+
+(defun my/enlight--rain-run (delay)
+  "Start the frame loop after DELAY seconds, unless it is running."
+  (when (and my/enlight-rain-enabled
+             (not my/enlight--rain-timer)
+             (my/enlight--rain-make-faces))
+    (setq my/enlight--rain-timer
+          (run-with-timer delay (/ 1.0 my/enlight-rain-fps)
+                          #'my/enlight--rain-frame))))
+
+(defun my/enlight-rain ()
+  "Start the rain on freshly inserted start page content.
+The overlays from before the redraw are stale, so they go first."
+  (my/enlight-rain-stop)
+  (mapc #'delete-overlay my/enlight--rain-overlays)
+  (setq my/enlight--rain-overlays nil
+        my/enlight--rain-segments nil
+        my/enlight--rain-size nil
+        my/enlight--rain-buffer (current-buffer))
+  (add-hook 'window-buffer-change-functions #'my/enlight--rain-resume nil t)
+  (my/enlight--rain-run my/enlight-rain-delay))
+
+(defun my/enlight--rain-resume (_window)
+  "Restart the rain when a window starts showing the start page."
+  (my/enlight--rain-run 0))
+
+(add-hook 'enlight-after-insert-hook #'my/enlight-rain)
 #+end_src
 
 * Claude
