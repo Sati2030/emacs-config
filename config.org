@@ -1240,7 +1240,7 @@ art intact."
   (require 'enlight)
   (require 'enlight-menu)
   (let* ((menus (grid-make-row
-                 (mapcar (lambda (menu) (list :content menu :padding '(0 3)))
+                 (mapcar (lambda (menu) (list :content menu :padding '(0 6)))
                          (my/enlight-menus))))
          (width (seq-max (mapcar #'string-width (split-string menus "\n")))))
     (concat
@@ -1277,7 +1277,7 @@ page is shown.
 The banner text is tagged with a =my/enlight-banner= property in
 =my/enlight-build=. After enlight inserts its content, every tagged
 character gets its own overlay, and a timer recolours those overlays
-about 30 times a second. Overlays sit on top of the text without
+=my/enlight-shimmer-fps= times a second. Overlays sit on top of the text without
 modifying it, so the read only buffer is never touched and stopping
 is just deleting them. They also evaporate if enlight redraws the
 buffer, and the redraw starts a fresh shimmer.
@@ -1298,6 +1298,8 @@ it.
 
 (defvar my/enlight-shimmer-rest 4
   "Seconds of rest between sweeps.")
+(defvar my/enlight-shimmer-fps 10
+  "Frames drawn per second.")
 (defvar my/enlight-shimmer-speed 40
   "Speed of the band, in columns per second.")
 (defvar my/enlight-shimmer-radius 6
@@ -1393,7 +1395,8 @@ Nothing happens when either colour is unknown, as on some terminals."
       (setq my/enlight--shimmer-cells (my/enlight--banner-cells))
       (when my/enlight--shimmer-cells
         (setq my/enlight--shimmer-timer
-              (run-with-timer my/enlight-shimmer-delay (/ 1.0 30)
+              (run-with-timer my/enlight-shimmer-delay
+                              (/ 1.0 my/enlight-shimmer-fps)
                               #'my/enlight--shimmer-frame
                               base text
                               (time-add nil my/enlight-shimmer-delay)))))))
