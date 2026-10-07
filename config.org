@@ -2056,3 +2056,15 @@ with the Emacs MCP tools enabled.
   :custom
   (docker-terminal-backend 'vterm))
 #+end_src
+
+* Discord
+
+elcord shows the current buffer as Discord Rich Presence. It talks to the desktop Discord app over a local IPC socket, so no login or token is needed, Discord just has to be running.
+
+#+begin_src emacs-lisp
+(use-package elcord
+  :custom
+  (elcord-display-buffer-details nil)
+  :config
+  (elcord-mode 1))
+#+end_src
