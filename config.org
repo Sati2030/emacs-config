@@ -790,15 +790,23 @@ loading pdf-tools until the first PDF is opened.
 
 =C-c C-c l= (=my/markdown-preview-toggle=, in place of markdown-mode's
 eww-based live preview) serves the buffer over a local HTTP server,
-rendered to HTML by pandoc with MathJax, and updates the page on every
-change. The preview opens in an =xwidget-webkit= side window, or in the
-external browser on builds without xwidget support. Toggling it off
-stops serving the buffer, closes the xwidget window, and stops the
+rendered to HTML by pandoc with MathJax, and updates the page once
+typing pauses. The preview opens in an =xwidget-webkit= side window, or
+in the external browser on builds without xwidget support. Toggling it
+off stops serving the buffer, closes the xwidget window, and stops the
 server once no buffer is being served.
+
+The pause matters because pandoc runs synchronously on Emacs's main
+thread and takes about a quarter second to start, so rendering on
+every change, impatient-mode's default, blocks each keystroke for that
+long. =impatient-mode-delay= instead renders after that many idle
+seconds.
 
 #+begin_src emacs-lisp
 (use-package simple-httpd)
-(use-package impatient-mode)
+(use-package impatient-mode
+  :custom
+  (impatient-mode-delay 0.5))
 
 (defun my/browse-url-in-emacs (url)
   "Open URL in an xwidget-webkit buffer, or externally without xwidget support."
