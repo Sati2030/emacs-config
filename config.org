@@ -796,17 +796,25 @@ in the external browser on builds without xwidget support. Toggling it
 off stops serving the buffer, closes the xwidget window, and stops the
 server once no buffer is being served.
 
-The pause matters because pandoc runs synchronously on Emacs's main
-thread and takes about a quarter second to start, so rendering on
-every change, impatient-mode's default, blocks each keystroke for that
-long. =impatient-mode-delay= instead renders after that many idle
-seconds.
+pandoc takes about a quarter second to start, so it runs as an
+asynchronous process and typing never waits for it. impatient-mode
+would render on every change by calling its filter synchronously, so
+its change hook is swapped for one that schedules a background render
+once typing pauses. The filter only prints the HTML of the last
+finished render, and the render's sentinel pushes that HTML to the
+page.
+
+Only one render runs per buffer. An edit made while one is running
+marks it stale, and it reruns once it finishes. Killing the old render
+on every edit instead would never let one finish while you type
+steadily.
+
+Two of the calls are impatient-mode internals, =imp--on-change= and
+=imp--update-buffer=, so an update to the package could break them.
 
 #+begin_src emacs-lisp
 (use-package simple-httpd)
-(use-package impatient-mode
-  :custom
-  (impatient-mode-delay 0.5))
+(use-package impatient-mode)
 
 (defun my/browse-url-in-emacs (url)
   "Open URL in an xwidget-webkit buffer, or externally without xwidget support."
@@ -814,16 +822,106 @@ seconds.
       (xwidget-webkit-browse-url url)
     (browse-url url)))
 
+(defvar my/imp-render-delay 0.2
+  "Idle seconds after an edit before the preview is rendered again.")
+
+(defvar-local my/imp--html ""
+  "HTML of the last finished render of this buffer.")
+(defvar-local my/imp--process nil
+  "The pandoc process rendering this buffer, if one is running.")
+(defvar-local my/imp--stale nil
+  "Non-nil if the buffer changed while pandoc was rendering it.")
+(defvar-local my/imp--timer nil
+  "Idle timer for the next render, if one is scheduled.")
+
 (defun my/imp-markdown-filter (buffer)
-  "Print BUFFER's markdown rendered to standalone HTML by pandoc."
-  (princ (with-temp-buffer
-           (insert-buffer-substring-no-properties buffer)
-           (call-process-region (point-min) (point-max) "pandoc" t t nil
-                                "-f" "markdown+tex_math_dollars"
-                                "-t" "html5"
-                                "--standalone"
-                                "--mathjax")
-           (buffer-string))))
+  "Print the HTML of BUFFER's last finished render."
+  (princ (buffer-local-value 'my/imp--html buffer)))
+
+(defun my/imp--render ()
+  "Render the current buffer to HTML with pandoc in the background.
+If a render is already running, mark it stale so it reruns when done."
+  (if (process-live-p my/imp--process)
+      (setq my/imp--stale t)
+    (let* ((source (current-buffer))
+           (output (generate-new-buffer " *pandoc*"))
+           (errors (generate-new-buffer " *pandoc errors*"))
+           (process
+            (make-process
+             :name "pandoc"
+             :buffer output
+             :stderr errors
+             ;; A pty line buffers its input and can cut a long buffer short.
+             :connection-type 'pipe
+             :coding 'utf-8
+             :noquery t
+             :command '("pandoc" "-f" "markdown+tex_math_dollars"
+                        "-t" "html5" "--standalone" "--mathjax")
+             :sentinel (lambda (process _event)
+                         (my/imp--render-done process source output errors)))))
+      (setq my/imp--stale nil
+            my/imp--process process)
+      (save-restriction
+        (widen)
+        (process-send-region process (point-min) (point-max)))
+      (process-send-eof process))))
+
+(defun my/imp--render-done (process source output errors)
+  "Push PROCESS's HTML in OUTPUT to SOURCE's preview, then clean up.
+On failure the page keeps the last good render and the first line of
+ERRORS is shown."
+  (when (memq (process-status process) '(exit signal))
+    (when (and (buffer-live-p source)
+               (eq process (buffer-local-value 'my/imp--process source)))
+      (with-current-buffer source
+        (setq my/imp--process nil)
+        (if (zerop (process-exit-status process))
+            (progn
+              (setq my/imp--html (with-current-buffer output (buffer-string)))
+              (imp--update-buffer))
+          (message "pandoc failed: %s"
+                   (with-current-buffer errors
+                     (buffer-substring (point-min)
+                                       (save-excursion
+                                         (goto-char (point-min))
+                                         (line-end-position))))))
+        (when my/imp--stale
+          (my/imp--render))))
+    (kill-buffer output)
+    (kill-buffer errors)))
+
+(defun my/imp--schedule-render (&rest _)
+  "Render the current buffer once Emacs has been idle for a moment.
+Meant for `after-change-functions'."
+  (unless my/imp--timer
+    (setq my/imp--timer
+          ;; A change made while already idle, such as a revert, would
+          ;; otherwise wait for the next idle period, so count from now.
+          (run-with-idle-timer
+           (time-add (or (current-idle-time) 0) my/imp-render-delay)
+           nil #'my/imp--scheduled-render (current-buffer)))))
+
+(defun my/imp--scheduled-render (buffer)
+  "Run BUFFER's scheduled render."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq my/imp--timer nil)
+      (my/imp--render))))
+
+(defun my/imp--stop-rendering ()
+  "Cancel the current buffer's pending render and kill a running one."
+  (remove-hook 'after-change-functions #'my/imp--schedule-render t)
+  (when my/imp--timer
+    (cancel-timer my/imp--timer)
+    (setq my/imp--timer nil))
+  ;; Forget the process before killing it, since `delete-process' runs
+  ;; the sentinel right away and it would report the kill as a failure.
+  (let ((process my/imp--process))
+    (setq my/imp--process nil
+          my/imp--stale nil
+          my/imp--html "")
+    (when (process-live-p process)
+      (delete-process process))))
 
 (defun my/imp-live-url ()
   "URL that impatient-mode serves the current buffer at."
@@ -856,6 +954,7 @@ preview opens in the external browser and the return value is nil."
   (interactive)
   (if impatient-mode
       (progn
+        (my/imp--stop-rendering)
         (impatient-mode -1)
         (when (buffer-live-p my/imp-preview-buffer)
           (let ((kill-buffer-query-functions nil))
@@ -868,7 +967,10 @@ preview opens in the external browser and the return value is nil."
     (unless (httpd-running-p)
       (httpd-start))
     (impatient-mode 1)
+    (remove-hook 'after-change-functions #'imp--on-change t)
+    (add-hook 'after-change-functions #'my/imp--schedule-render nil t)
     (imp-set-user-filter #'my/imp-markdown-filter)
+    (my/imp--render)
     (setq my/imp-preview-buffer (my/imp-show-preview))
     (message "Markdown preview on")))
 #+end_src
