@@ -1900,12 +1900,6 @@ A step is a wheel press when the app tracks the mouse, else a window line."
           (ghostel--mouse-event ghostel--term 0 button
                                 (/ (window-body-height) 2) 0 0))
       (if (= button 4) (scroll-down n) (scroll-up n))))
-  (defun my/ghostel-scroll-up ()
-    (interactive)
-    (my/ghostel-scroll 4 1))
-  (defun my/ghostel-scroll-down ()
-    (interactive)
-    (my/ghostel-scroll 5 1))
   (defun my/ghostel-scroll-up-5 ()
     (interactive)
     (my/ghostel-scroll 4 5))
@@ -1913,20 +1907,10 @@ A step is a wheel press when the app tracks the mouse, else a window line."
     (interactive)
     (my/ghostel-scroll 5 5))
 
-  ;; As exceptions, C-p and C-n are not sent to the terminal and fall
-  ;; through to `ghostel-mode-map', the parent of the input mode maps.
-  ;; Bindings there survive because ghostel rebuilds only
-  ;; `ghostel-semi-char-mode-map' (from this exception list).
-  (customize-set-variable 'ghostel-keymap-exceptions
-                          (append ghostel-keymap-exceptions '("C-p" "C-n")))
-  (define-key ghostel-mode-map (kbd "C-p") #'my/ghostel-scroll-up)
-  (define-key ghostel-mode-map (kbd "C-n") #'my/ghostel-scroll-down)
   ;; Super keys are never sent to the terminal, so no exception is needed.
   (define-key ghostel-mode-map (kbd "s-p") #'my/ghostel-scroll-up-5)
   (define-key ghostel-mode-map (kbd "s-n") #'my/ghostel-scroll-down-5)
   ;; Copy and Emacs modes also inherit `ghostel-mode-map'; keep line motion.
-  (define-key ghostel-readonly-mode-map (kbd "C-p") #'previous-line)
-  (define-key ghostel-readonly-mode-map (kbd "C-n") #'next-line)
   (define-key ghostel-readonly-mode-map (kbd "s-p") #'my/previous-line-5)
   (define-key ghostel-readonly-mode-map (kbd "s-n") #'my/next-line-5)
   ;; Sends M-DEL, which the Claude CLI treats as backward-kill-word.
