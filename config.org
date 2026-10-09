@@ -652,13 +652,30 @@ run command to =idf.py flash monitor=.
 
 =my/pio-reload-compile-commands= regenerates =compile_commands.json=
 with =pio run -t compiledb= and restarts the LSP workspace, so clangd
-sees newly added =lib/= folders.
+sees newly added =lib/= folders. It builds the =default_envs= from
+=platformio.ini=, so no env name is hardcoded here. With =C-u= it asks
+for one of the file's =[env:NAME]= sections instead, since each env
+compiles different sources (a file outside the chosen env's
+=build_src_filter= gets no flags).
 
 #+begin_src emacs-lisp
-(defun my/pio-reload-compile-commands ()
+(defun my/pio-envs ()
+  "Return the env names declared as [env:NAME] in platformio.ini."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "platformio.ini" (my/project-root)))
+    (let (envs)
+      (while (re-search-forward "^\\[env:\\([^]]+\\)\\]" nil t)
+        (push (match-string 1) envs))
+      (nreverse envs))))
+
+(defun my/pio-reload-compile-commands (&optional env)
   "Regenerate compile_commands.json via PlatformIO, then restart the LSP workspace.
-Runs pio in a hidden buffer that is shown only if the build fails."
-  (interactive)
+Builds the default_envs of platformio.ini, or ENV when given. With a
+prefix argument, asks for ENV. Runs pio in a hidden buffer that is
+shown only if the build fails."
+  (interactive
+   (list (and current-prefix-arg
+              (completing-read "PlatformIO env: " (my/pio-envs) nil t))))
   (let* ((default-directory (my/project-root))
          ;; Captured here, since the sentinel runs in the process buffer,
          ;; which has no LSP workspace.
@@ -672,7 +689,8 @@ Runs pio in a hidden buffer that is shown only if the build fails."
     (make-process
      :name "pio-compiledb"
      :buffer buf
-     :command '("pio" "run" "-t" "compiledb" "-e" "unified")
+     :command (append '("pio" "run" "-t" "compiledb")
+                      (and env (list "-e" env)))
      :sentinel
      (lambda (process _event)
        (when (memq (process-status process) '(exit signal))
