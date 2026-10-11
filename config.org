@@ -1621,14 +1621,29 @@ change each frame to make the glyphs flicker.
 
 The layout depends on the window size, so each frame compares the
 size with the one the overlays were built for and rebuilds them when
-it changed. Like the shimmer, the loop stops when no window shows the
-page. Its overlays are kept, so the page looks the same until the
-loop starts again.
+it changed. Like the shimmer, the loop stops when the page is not in
+the selected window, so it costs nothing while you work elsewhere. Its
+overlays are kept, so the page looks the same until the loop starts
+again.
+
+Keeping it cheap matters, because a frame blocks typing for as long
+as it takes:
+
+- redisplay is the main cost, and it grows with the number of lit
+  cells, since each one has its own face. Only every
+  =my/enlight-rain-column-step= columns carries rain, which halves
+  that work and leaves the gaps the film's rain has anyway,
+- every frame builds fresh strings for the overlays, and the garbage
+  they leave is a good share of the cost too, so fewer lit cells
+  also means fewer collections,
+- =config.el= is loaded as source, and interpreted Lisp is about three
+  times slower than byte code, so the functions that run every frame
+  are compiled once they are defined.
 
 #+begin_src emacs-lisp
 (defvar my/enlight-rain-enabled t
   "Non-nil means draw falling code behind the start page.")
-(defvar my/enlight-rain-fps 20
+(defvar my/enlight-rain-fps 15
   "Frames per second.")
 (defvar my/enlight-rain-speed '(6 . 18)
   "Slowest and fastest drop speeds, in rows per second.")
@@ -1647,6 +1662,9 @@ loop starts again.
   "Share of the characters swapped every frame.")
 (defvar my/enlight-rain-min-gap 4
   "Gaps inside a line narrower than this stay blank.")
+(defvar my/enlight-rain-column-step 2
+  "Only every this many columns carries rain. 1 fills every column,
+at about twice the drawing cost.")
 (defvar my/enlight-rain-chars
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$+-*/=%\"'#&_(),.;:?!|{}<>[]^~"
   "Characters the rain is made of. Every one must be one column wide.")
@@ -1810,7 +1828,8 @@ Return the segments with the line's last one first."
              (drop (aref my/enlight--rain-drops c))
              (behind (- (aref drop 0) row))
              (length (aref drop 2)))
-        (when (and (>= behind 0) (< behind length))
+        (when (and (zerop (% c my/enlight-rain-column-step))
+                   (>= behind 0) (< behind length))
           (aset text i (aref my/enlight--rain-grid (+ (* row cols) c)))
           (put-text-property
            i (1+ i) 'face
@@ -1835,10 +1854,20 @@ Return the segments with the line's last one first."
                                    collect (my/enlight--rain-row
                                             (+ row k) 0 edge)))))))
 
+(defun my/enlight--rain-window ()
+  "The selected window when it shows the start page, else nil.
+While the minibuffer is active, the window it was opened from counts."
+  (let ((window (if (minibufferp (window-buffer (selected-window)))
+                    (minibuffer-selected-window)
+                  (selected-window))))
+    (and window
+         (buffer-live-p my/enlight--rain-buffer)
+         (eq (window-buffer window) my/enlight--rain-buffer)
+         window)))
+
 (defun my/enlight--rain-frame ()
-  "Advance and draw one frame, or stop when the page is hidden."
-  (let ((window (and (buffer-live-p my/enlight--rain-buffer)
-                     (get-buffer-window my/enlight--rain-buffer t))))
+  "Advance and draw one frame, or stop when the page is not selected."
+  (let ((window (my/enlight--rain-window)))
     (if (not window)
         (my/enlight-rain-stop)
       (with-current-buffer my/enlight--rain-buffer
@@ -1878,11 +1907,22 @@ The overlays from before the redraw are stale, so they go first."
         my/enlight--rain-size nil
         my/enlight--rain-buffer (current-buffer))
   (add-hook 'window-buffer-change-functions #'my/enlight--rain-resume nil t)
+  (add-hook 'window-selection-change-functions #'my/enlight--rain-resume nil t)
   (my/enlight--rain-run my/enlight-rain-delay))
 
 (defun my/enlight--rain-resume (_window)
-  "Restart the rain when a window starts showing the start page."
-  (my/enlight--rain-run 0))
+  "Restart the rain when the start page becomes the selected window.
+Emacs also runs this when the page is left, hence the check."
+  (when (my/enlight--rain-window)
+    (my/enlight--rain-run 0)))
+
+(mapc #'byte-compile '(my/enlight--rain-random-char
+                       my/enlight--rain-new-drop
+                       my/enlight--rain-step
+                       my/enlight--rain-row
+                       my/enlight--rain-paint
+                       my/enlight--rain-window
+                       my/enlight--rain-frame))
 
 (add-hook 'enlight-after-insert-hook #'my/enlight-rain)
 #+end_src
