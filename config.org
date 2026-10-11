@@ -1060,6 +1060,41 @@ var w=(f&&f.contentWindow)?f.contentWindow:window;%s})();" expr)))
   (define-key xwidget-webkit-mode-map (kbd "DEL") #'my/xwidget-scroll-down))
 #+end_src
 
+*** Reloading the impatient preview from disk
+
+The preview renders the markdown buffer, not the file, so reloading the
+page (=xwidget-webkit-reload=) shows the same text again when another
+program has changed the file. =r= in a preview instead reverts its
+source buffer, and the revert's change hook re-renders the preview. The
+source keeps its modes, so impatient-mode and that hook survive, and a
+source with unsaved edits is left alone. In any other xwidget buffer
+=r= still reloads the page.
+
+#+begin_src emacs-lisp
+(defun my/imp-preview-source ()
+  "The buffer whose impatient preview is the current buffer, or nil."
+  (let ((preview (current-buffer)))
+    (seq-find (lambda (buf)
+                (eq (buffer-local-value 'my/imp-preview-buffer buf) preview))
+              (buffer-list))))
+
+(defun my/xwidget-reload ()
+  "Revert the preview's source buffer, or reload the page if not a preview."
+  (interactive nil xwidget-webkit-mode)
+  (let ((source (my/imp-preview-source)))
+    (cond ((not source)
+           (xwidget-webkit-reload))
+          ((buffer-modified-p source)
+           (message "%s has unsaved edits, not reverting" (buffer-name source)))
+          (t
+           (with-current-buffer source
+             (revert-buffer t t t))
+           (message "Reverted %s" (buffer-name source))))))
+
+(with-eval-after-load 'xwidget
+  (define-key xwidget-webkit-mode-map (kbd "r") #'my/xwidget-reload))
+#+end_src
+
 ** TypeScript / TSX
 
 Tree-sitter modes give syntax coloring; lsp-mode (typescript-language-server)
