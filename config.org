@@ -1979,13 +1979,14 @@ A step is a wheel press when the app tracks the mouse, else a window line."
 ** claude-code-ide
 
 Claude Code sessions inside Emacs, opened from =C-c C-'= or =M-x claude=,
-with the Emacs MCP tools enabled. =C-c n= skips the menu and starts a
-new instance in a new frame.
+with the Emacs MCP tools enabled. =C-c c= skips the menu and starts a
+new instance, and =C-c n= starts one in a new frame.
 
 #+begin_src emacs-lisp
 (use-package claude-code-ide
   :vc (:url "https://github.com/manzaltu/claude-code-ide.el" :rev :newest)
   :bind (("C-c C-'" . claude-code-ide-menu)
+         ("C-c c" . claude-code-ide)
          ("C-c n" . my/claude-new-frame))
   :custom
   (claude-code-ide-terminal-backend 'ghostel)
