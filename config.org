@@ -1209,15 +1209,41 @@ than after a fixed delay. Requires:
 npm i -g live-server
 #+end_example
 
+When the project root has a =package.json= with a =dev= script, the
+command runs =npm run dev= instead, so projects with their own Node
+server (Express and the like) preview through that server. The contract
+is the same as live-server's: the script must honor the =PORT=
+environment variable (=0= meaning any free port) and print a line of
+the form =Serving <something> at <URL>= once it listens. Live reload is
+then the server's job (for example =livereload= plus
+=connect-livereload=). The page opened is the root URL, since Emacs
+cannot know how the server maps files to routes. Stopping works on the
+whole process tree, because Emacs starts the child as its own process
+group and signals the group, so the Node server behind npm never
+lingers holding its port.
+
 #+begin_src emacs-lisp
 (require 'ansi-color)
 
 (defvar my/live-server-process nil
   "The running live-server process, if any.")
 
+(defun my/npm-dev-script-p (root)
+  "Non-nil when ROOT has a package.json defining a `dev' script."
+  (let ((file (expand-file-name "package.json" root)))
+    (and (file-readable-p file)
+         (let ((json (json-parse-string
+                      (with-temp-buffer
+                        (insert-file-contents file)
+                        (buffer-string))
+                      :object-type 'alist)))
+           (alist-get 'dev (alist-get 'scripts json))))))
+
 (defun my/frontend-preview ()
-  "Toggle live-server for the current project, shown in a side window.
-Opens the current file when it is an HTML page, else the root's index."
+  "Toggle a dev server for the current project, shown in a side window.
+Runs `npm run dev' when the project defines that script, else
+live-server. With live-server, opens the current file when it is an
+HTML page, else the root's index."
   (interactive)
   (if (process-live-p my/live-server-process)
       (progn
@@ -1225,24 +1251,34 @@ Opens the current file when it is an HTML page, else the root's index."
         (message "Frontend preview off"))
     (let* ((root (my/project-root))
            (default-directory root)
-           (page (and buffer-file-name
+           (npm (my/npm-dev-script-p root))
+           (page (and (not npm)
+                      buffer-file-name
                       (string-match-p "\\.html?\\'" buffer-file-name)
                       (file-relative-name buffer-file-name root)))
+           (process-environment (cons "PORT=0" process-environment))
            (output (get-buffer-create "*live-server*")))
+      (when (and npm (not (file-directory-p
+                           (expand-file-name "node_modules" root))))
+        (message "node_modules missing, running npm install first...")
+        (call-process "npm" nil "*npm-install*" t "install"))
       (with-current-buffer output
         (let ((inhibit-read-only t))
           (erase-buffer)))
       (setq my/live-server-process
             (make-process
-             :name "live-server"
+             :name (if npm "npm-dev" "live-server")
              :buffer output
-             :command '("live-server" "--no-browser" "--port=0")
+             :command (if npm
+                          '("npm" "run" "dev")
+                        '("live-server" "--no-browser" "--port=0"))
              :connection-type 'pipe
              :noquery t
              :filter (lambda (process string)
                        (my/live-server--filter process string page))
              :sentinel #'my/live-server--sentinel))
-      (message "Starting live-server in %s ..." root))))
+      (message "Starting %s in %s ..."
+               (if npm "npm run dev" "live-server") root))))
 
 (defun my/live-server--filter (process string page)
   "Log PROCESS's STRING, opening PAGE once live-server prints its URL.
@@ -1278,7 +1314,8 @@ Reports EVENT when live-server exits on its own rather than being stopped."
     (when (eq process my/live-server-process)
       (setq my/live-server-process nil))
     (when (eq (process-status process) 'exit)
-      (message "live-server %s (see *live-server*)" (string-trim event)))))
+      (message "%s %s (see *live-server*)"
+               (process-name process) (string-trim event)))))
 #+end_src
 
 *** npm dev server (Next.js and other Node projects)
