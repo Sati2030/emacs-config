@@ -1127,145 +1127,59 @@ gives completion/suggestions. Grammars auto-install on first open if missing.
 (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))
 #+end_src
 
-** GLSL
+** Indenting code inside JavaScript template literals
 
-=glsl-mode= is a cc-mode based major mode for shader source, so it
-indents like the C buffers do. It also covers standalone =.vert=,
-=.frag= and =.glsl= files.
+js-mode refuses to indent any line that starts inside a string
+(=js-indent-line= is wrapped in =(unless (nth 3 parse-status) ...)=),
+so =TAB= does nothing in a multi-line backtick string such as a WebGL
+shader. This runs before the mode's own indenter and handles only
+those lines, using C-style brace counting:
 
-#+begin_src emacs-lisp
-;; glsl-mode never picks a cc-mode style, so it would fall back to "gnu"
-;; (2-space steps, half-indented braces). Use K&R with 4 spaces instead.
-(defun my/glsl-mode-setup ()
-  "Indent GLSL K&R style, spaces only."
-  (c-set-style "k&r")
-  (setq-local c-basic-offset 4
-              indent-tabs-mode nil))
+- base column is the indentation of the line holding the opening backtick
+- each unclosed ={= inside the literal adds one =js-indent-level=
+- a line starting with =}= sits one level shallower
+- the line with the closing backtick returns to the base column
 
-(use-package glsl-mode
-  :mode ("\\.vert\\'" "\\.frag\\'" "\\.glsl\\'")
-  :hook (glsl-mode . my/glsl-mode-setup))
-#+end_src
-
-*** Editing shaders inside JavaScript template literals
-
-To js-mode a WebGL shader written in backticks is one string token, and
-its indentation engine never touches string contents. =C-c '= (same key
-as org's src block editing) opens the template literal at point in a
-separate =glsl-mode= buffer through =edit-indirect=. =C-c C-c= writes it
-back and closes, =C-x C-s= writes it back and keeps editing, =C-c C-k=
-discards.
-
-The region is taken as whole lines between the backtick lines. Their
-common indentation is stripped on the way in, so the shader starts at
-column 0 in the GLSL buffer, and added back on commit, so it lines up
-with the JavaScript around it. The offset rides on edit-indirect's
-overlay, which lives in the JS buffer and survives repeated commits.
+Every other line falls through to the normal JS indenter. js-mode
+already lists ={= and =}= in =electric-indent-chars=, so =RET= and
+typing =}= reindent automatically too.
 
 #+begin_src emacs-lisp
-(use-package edit-indirect
-  :commands edit-indirect-region)
-
-;; This file uses lexical binding, so a `let' of a variable not yet known
-;; to be special is invisible to edit-indirect. Declare them up front.
-(defvar edit-indirect-guess-mode-function)
-(defvar edit-indirect--overlay)
-(defvar js-indent-level)
-
-(defun my/template-literal-bounds ()
-  "Return (OPEN . CLOSE) positions of the backticks around point, or nil."
-  (let* ((ppss (syntax-ppss))
-         (start (nth 8 ppss)))
-    (when (and (nth 3 ppss) (eq (char-after start) ?`))
-      (save-excursion
-        (goto-char start)
-        (forward-sexp)
-        (cons start (1- (point)))))))
-
-(defun my/blank-between-p (beg end)
-  "Non-nil if BEG..END holds only whitespace."
-  (string-blank-p (buffer-substring-no-properties beg end)))
-
-(defun my/min-indentation (beg end)
-  "Smallest indentation of a non-blank line in BEG..END, or nil."
-  (save-excursion
-    (goto-char beg)
-    (let (best)
-      (while (< (point) end)
-        (unless (looking-at-p "[ \t]*$")
-          (setq best (min (or best most-positive-fixnum)
-                          (current-indentation))))
-        (forward-line 1))
-      best)))
-
-(defun my/reindent-committed-glsl (beg end)
-  "Shift text committed from a GLSL edit-indirect buffer back right.
-Runs in the parent buffer from `edit-indirect-after-commit-functions'."
-  (when-let* ((ov (seq-find (lambda (o) (overlay-get o 'my/glsl-indent))
-                            (overlays-in beg end))))
-    ;; indent-rigidly leaves blank lines empty, so no trailing spaces.
-    ;; Spaces only: tabs here would end up inside the shader string.
-    (let ((indent-tabs-mode nil))
-      (indent-rigidly beg end (overlay-get ov 'my/glsl-indent)))))
-
-(add-hook 'edit-indirect-after-commit-functions #'my/reindent-committed-glsl)
-
-(defun my/edit-glsl-template-literal ()
-  "Edit the template literal at point in a `glsl-mode' edit-indirect buffer."
-  (interactive)
-  (require 'edit-indirect)
-  (let ((bounds (or (my/template-literal-bounds)
-                    (user-error "Point is not inside a `template literal`"))))
-    ;; An empty literal like `` on one line has no whole lines to edit.
-    ;; Open it up to a blank line with the closing backtick below. The
-    ;; blank line matters: edit-indirect tracks the region with an
-    ;; overlay, and a zero-width overlay cannot grow when text is
-    ;; committed into it.
-    (when (and (= (line-number-at-pos (car bounds))
-                  (line-number-at-pos (cdr bounds)))
-               (my/blank-between-p (1+ (car bounds)) (cdr bounds)))
-      (let ((indent (save-excursion (goto-char (car bounds))
-                                    (current-indentation))))
+(defun my/js-template-literal-indent-line ()
+  "Indent the current line if it starts inside a template literal.
+Return non-nil when the line was handled, nil to defer to the mode."
+  (let* ((ppss (save-excursion (syntax-ppss (line-beginning-position))))
+         (open (nth 8 ppss)))
+    (when (and (nth 3 ppss) (eq (char-after open) ?`))
+      (let* ((step (if (boundp 'js-indent-level) js-indent-level 4))
+             (base (save-excursion (goto-char open) (current-indentation)))
+             (first-char (save-excursion (back-to-indentation) (char-after)))
+             (bol (line-beginning-position))
+             (depth 0))
+        ;; Net brace depth between the opening backtick and this line.
         (save-excursion
-          (delete-region (1+ (car bounds)) (cdr bounds))
-          (goto-char (1+ (car bounds)))
-          (insert "\n\n" (make-string indent ?\s))))
-      (setq bounds (my/template-literal-bounds)))
-    (let* ((open (car bounds))
-           (close (cdr bounds))
-           ;; Start on the line after the opening backtick when nothing
-           ;; but whitespace follows it, else right after the backtick.
-           (beg (save-excursion
-                  (goto-char (1+ open))
-                  (if (my/blank-between-p (point) (line-end-position))
-                      (min (1+ (line-end-position)) close)
-                    (point))))
-           ;; End at the start of the closing backtick's line when only
-           ;; whitespace precedes it, so that indentation stays JS's.
-           (end (save-excursion
-                  (goto-char close)
-                  (if (and (my/blank-between-p (line-beginning-position) close)
-                           (>= (line-beginning-position) beg))
-                      (line-beginning-position)
-                    close)))
-           ;; Empty shader: indent one level past the line holding the
-           ;; opening backtick.
-           (indent (or (my/min-indentation beg end)
-                       (save-excursion
-                         (goto-char open)
-                         (+ (current-indentation)
-                            (if (boundp 'js-indent-level) js-indent-level 4)))))
-           ;; glsl-mode is autoloaded by its use-package :mode entry.
-           (edit-indirect-guess-mode-function (lambda (&rest _) (glsl-mode)))
-           (buf (edit-indirect-region beg end t)))
-      (with-current-buffer buf
-        (overlay-put edit-indirect--overlay 'my/glsl-indent indent)
-        (indent-rigidly (point-min) (point-max) (- indent))
-        (set-buffer-modified-p nil)))))
+          (goto-char (1+ open))
+          (while (progn (skip-chars-forward "^{}" bol) (< (point) bol))
+            (setq depth (+ depth (if (eq (char-after) ?{) 1 -1)))
+            (forward-char 1)))
+        (when (eq first-char ?}) (setq depth (1- depth)))
+        (let ((target (if (eq first-char ?`)
+                          base
+                        (+ base (* step (1+ (max 0 depth))))))
+              (offset (- (point) (save-excursion (back-to-indentation) (point)))))
+          ;; Spaces only: the indentation is part of the string's text.
+          (let ((indent-tabs-mode nil))
+            (indent-line-to target))
+          (when (> offset 0) (forward-char offset))))
+      t)))
 
-(with-eval-after-load 'js
-  (define-key js-mode-map    (kbd "C-c '") #'my/edit-glsl-template-literal)
-  (define-key js-ts-mode-map (kbd "C-c '") #'my/edit-glsl-template-literal))
+(defun my/js-enable-template-literal-indent ()
+  "Try the template literal indenter before the mode's own one."
+  (add-function :before-until (local 'indent-line-function)
+                #'my/js-template-literal-indent-line))
+
+(add-hook 'js-mode-hook    #'my/js-enable-template-literal-indent)
+(add-hook 'js-ts-mode-hook #'my/js-enable-template-literal-indent)
 #+end_src
 
 ** Web frontend previews
