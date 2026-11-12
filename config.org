@@ -967,20 +967,25 @@ preview opens in the external browser and the return value is nil."
                           (window-width . 0.5)))
         preview))))
 
+(defun my/imp-close-preview ()
+  "Stop serving the current buffer and close its preview.
+The server stops too once no buffer is being served."
+  (impatient-mode -1)
+  (when (buffer-live-p my/imp-preview-buffer)
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer my/imp-preview-buffer)))
+  (setq my/imp-preview-buffer nil)
+  (unless (seq-some (lambda (buf) (buffer-local-value 'impatient-mode buf))
+                    (buffer-list))
+    (httpd-stop)))
+
 (defun my/markdown-preview-toggle ()
   "Toggle the live HTML preview of the current markdown buffer."
   (interactive)
   (if impatient-mode
       (progn
         (my/imp--stop-rendering)
-        (impatient-mode -1)
-        (when (buffer-live-p my/imp-preview-buffer)
-          (let ((kill-buffer-query-functions nil))
-            (kill-buffer my/imp-preview-buffer)))
-        (setq my/imp-preview-buffer nil)
-        (unless (seq-some (lambda (buf) (buffer-local-value 'impatient-mode buf))
-                          (buffer-list))
-          (httpd-stop))
+        (my/imp-close-preview)
         (message "Markdown preview off"))
     (unless (httpd-running-p)
       (httpd-start))
@@ -1140,6 +1145,38 @@ Serves the root without opening a file when the buffer visits none."
                   (format "live-server --open=%s" (shell-quote-argument rel))
                 "live-server")))
     (async-shell-command cmd "*live-server*")))
+#+end_src
+
+*** Static pages inside Emacs via impatient-mode
+
+=M-x my/html-preview-toggle= in an HTML buffer serves it with
+impatient-mode and shows the page in the same =xwidget-webkit= side
+window as the markdown preview. The page updates as you type, before
+saving. Running it again closes the preview and stops the server once
+no buffer is being served.
+
+impatient-mode serves HTML buffers as they are, with no filter, and
+loads the page's relative CSS, JS and images from the buffer's
+directory. A stylesheet or script that is open in a buffer with
+=impatient-mode= turned on is served from that buffer instead of from
+disk, and editing it reloads the page.
+
+#+begin_src emacs-lisp
+(defun my/html-preview-toggle ()
+  "Toggle a live preview of the current HTML buffer in a side window."
+  (interactive)
+  (if impatient-mode
+      (progn
+        (my/imp-close-preview)
+        (message "HTML preview off"))
+    (unless buffer-file-name
+      ;; Relative links resolve against the visited file's directory.
+      (user-error "Save the buffer to a file first so its CSS and JS can load"))
+    (unless (httpd-running-p)
+      (httpd-start))
+    (impatient-mode 1)
+    (setq my/imp-preview-buffer (my/imp-show-preview))
+    (message "HTML preview on")))
 #+end_src
 
 *** npm dev server (Next.js and other Node projects)
