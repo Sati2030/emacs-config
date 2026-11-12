@@ -475,7 +475,9 @@ reentrant call of Tramp" error. They still recheck on save and on newline.
 ** lsp-mode
 
 C# uses OmniSharp from a local build, LaTeX uses texlab, and clangd
-indexes in the background.
+indexes in the background. Plain JavaScript also goes through
+typescript-language-server, which infers types from the bundled DOM
+definitions (so a WebGL context gets full member completion).
 
 #+begin_src emacs-lisp
 (use-package lsp-mode
@@ -484,6 +486,8 @@ indexes in the background.
          (c-mode             . lsp-deferred)
          (c++-mode           . lsp-deferred)
          (css-mode           . lsp-deferred)
+         (js-mode            . lsp-deferred)
+         (js-ts-mode         . lsp-deferred)
          (typescript-ts-mode . lsp-deferred)
          (tsx-ts-mode        . lsp-deferred))
   :custom
@@ -949,23 +953,26 @@ Meant for `after-change-functions'."
 (defvar-local my/imp-preview-buffer nil
   "The xwidget buffer showing this buffer's preview, if any.")
 
-(defun my/imp-show-preview ()
-  "Open the current buffer's preview and return its xwidget buffer.
-The xwidget is shown in a side window. Without xwidget support the
-preview opens in the external browser and the return value is nil."
-  (let ((source (current-buffer))
-        (url (my/imp-live-url)))
-    (if (not (featurep 'xwidget-internal))
-        (progn (browse-url url) nil)
-      ;; A new session per preview, so each source buffer gets its own.
-      (xwidget-webkit-browse-url url t)
-      (let ((preview (current-buffer)))
-        (switch-to-buffer source)
-        (display-buffer preview
-                        '(display-buffer-in-side-window
-                          (side . right)
-                          (window-width . 0.5)))
-        preview))))
+(defun my/show-url-in-side-window (url)
+  "Show URL in a right side window and return its xwidget buffer.
+Without xwidget support URL opens in the external browser and the
+return value is nil. The selected window and current buffer are left
+as they were, so this is safe to call from a process filter."
+  (if (not (featurep 'xwidget-internal))
+      (progn (browse-url url) nil)
+    (let ((window (selected-window))
+          (shown (window-buffer)))
+      (save-current-buffer
+        ;; A new session per preview, so each preview gets its own buffer.
+        (xwidget-webkit-browse-url url t)
+        (let ((preview (current-buffer)))
+          ;; Browsing took over the selected window, so give it back.
+          (set-window-buffer window shown)
+          (display-buffer preview
+                          '(display-buffer-in-side-window
+                            (side . right)
+                            (window-width . 0.5)))
+          preview)))))
 
 (defun my/imp-close-preview ()
   "Stop serving the current buffer and close its preview.
@@ -994,7 +1001,7 @@ The server stops too once no buffer is being served."
     (add-hook 'after-change-functions #'my/imp--schedule-render nil t)
     (imp-set-user-filter #'my/imp-markdown-filter)
     (my/imp--render)
-    (setq my/imp-preview-buffer (my/imp-show-preview))
+    (setq my/imp-preview-buffer (my/show-url-in-side-window (my/imp-live-url)))
     (message "Markdown preview on")))
 #+end_src
 
@@ -1124,59 +1131,99 @@ gives completion/suggestions. Grammars auto-install on first open if missing.
 
 *** Static pages via live-server
 
-=my/frontend-preview= runs the =live-server= npm dev server in the
-project root and opens the current file in the browser, which reloads on
-every save. Killing the =*live-server*= buffer stops it. Requires:
+=M-x my/frontend-preview= runs the =live-server= npm dev server in the
+project root and shows the page in the same =xwidget-webkit= side
+window as the markdown preview, or in the external browser on builds
+without xwidget support. It opens the current file when that is an HTML
+page, and the root's =index.html= otherwise, so running it from a JS or
+CSS buffer still shows the site. Running it again stops the server and
+closes the window, and so does killing the =*live-server*= buffer.
+
+live-server injects a small script that reloads the whole page on every
+save. A full reload gives scripts a fresh JavaScript realm each time,
+which matters for ES modules (they run only once per realm) and for
+WebGL (no stale contexts or leftover animation loops).
+
+=--port=0= lets the OS pick a free port, so it never clashes with the
+simple-httpd server behind the markdown preview. The real URL comes
+from the "Serving ... at URL" line live-server prints once it is
+listening, so the page opens as soon as the server is ready rather
+than after a fixed delay. Requires:
 
 #+begin_example
 npm i -g live-server
 #+end_example
 
 #+begin_src emacs-lisp
+(require 'ansi-color)
+
+(defvar my/live-server-process nil
+  "The running live-server process, if any.")
+
 (defun my/frontend-preview ()
-  "Run live-server in the project root, opening the current file.
-Serves the root without opening a file when the buffer visits none."
+  "Toggle live-server for the current project, shown in a side window.
+Opens the current file when it is an HTML page, else the root's index."
   (interactive)
-  (let* ((root (my/project-root))
-         (default-directory root)
-         (rel (and buffer-file-name
-                   (file-relative-name buffer-file-name root)))
-         (cmd (if rel
-                  (format "live-server --open=%s" (shell-quote-argument rel))
-                "live-server")))
-    (async-shell-command cmd "*live-server*")))
-#+end_src
-
-*** Static pages inside Emacs via impatient-mode
-
-=M-x my/html-preview-toggle= in an HTML buffer serves it with
-impatient-mode and shows the page in the same =xwidget-webkit= side
-window as the markdown preview. The page updates as you type, before
-saving. Running it again closes the preview and stops the server once
-no buffer is being served.
-
-impatient-mode serves HTML buffers as they are, with no filter, and
-loads the page's relative CSS, JS and images from the buffer's
-directory. A stylesheet or script that is open in a buffer with
-=impatient-mode= turned on is served from that buffer instead of from
-disk, and editing it reloads the page.
-
-#+begin_src emacs-lisp
-(defun my/html-preview-toggle ()
-  "Toggle a live preview of the current HTML buffer in a side window."
-  (interactive)
-  (if impatient-mode
+  (if (process-live-p my/live-server-process)
       (progn
-        (my/imp-close-preview)
-        (message "HTML preview off"))
-    (unless buffer-file-name
-      ;; Relative links resolve against the visited file's directory.
-      (user-error "Save the buffer to a file first so its CSS and JS can load"))
-    (unless (httpd-running-p)
-      (httpd-start))
-    (impatient-mode 1)
-    (setq my/imp-preview-buffer (my/imp-show-preview))
-    (message "HTML preview on")))
+        (delete-process my/live-server-process)
+        (message "Frontend preview off"))
+    (let* ((root (my/project-root))
+           (default-directory root)
+           (page (and buffer-file-name
+                      (string-match-p "\\.html?\\'" buffer-file-name)
+                      (file-relative-name buffer-file-name root)))
+           (output (get-buffer-create "*live-server*")))
+      (with-current-buffer output
+        (let ((inhibit-read-only t))
+          (erase-buffer)))
+      (setq my/live-server-process
+            (make-process
+             :name "live-server"
+             :buffer output
+             :command '("live-server" "--no-browser" "--port=0")
+             :connection-type 'pipe
+             :noquery t
+             :filter (lambda (process string)
+                       (my/live-server--filter process string page))
+             :sentinel #'my/live-server--sentinel))
+      (message "Starting live-server in %s ..." root))))
+
+(defun my/live-server--filter (process string page)
+  "Log PROCESS's STRING, opening PAGE once live-server prints its URL.
+PAGE is a path relative to the served root, or nil for the index."
+  (let ((log (process-buffer process)))
+    (when (buffer-live-p log)
+      (with-current-buffer log
+        (save-excursion
+          (goto-char (point-max))
+          (insert (ansi-color-filter-apply string))
+          ;; Search the whole log, since the line can arrive in pieces.
+          (unless (process-get process 'preview-opened)
+            (goto-char (point-min))
+            (when (re-search-forward "Serving .* at \\(https?://[^[:space:]]+\\)"
+                                     nil t)
+              (process-put process 'preview-opened t)
+              (process-put
+               process 'preview
+               (my/show-url-in-side-window
+                (concat (match-string 1) "/"
+                        (and page (mapconcat #'url-hexify-string
+                                             (split-string page "/")
+                                             "/"))))))))))))
+
+(defun my/live-server--sentinel (process event)
+  "Close PROCESS's preview once live-server has exited.
+Reports EVENT when live-server exits on its own rather than being stopped."
+  (unless (process-live-p process)
+    (let ((preview (process-get process 'preview)))
+      (when (buffer-live-p preview)
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer preview))))
+    (when (eq process my/live-server-process)
+      (setq my/live-server-process nil))
+    (when (eq (process-status process) 'exit)
+      (message "live-server %s (see *live-server*)" (string-trim event)))))
 #+end_src
 
 *** npm dev server (Next.js and other Node projects)
