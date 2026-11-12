@@ -1969,8 +1969,9 @@ Emacs also runs this when the page is left, hence the check."
 Terminal backend for Claude sessions, built on Ghostty's VT engine. Its
 native module is downloaded from the GitHub releases on first use.
 
-=C-p= / =C-n= scroll the chat one step and =s-p= / =s-n= five steps,
-while Claude's prompt history stays on the arrow keys. When the app
+=s-p= / =s-n= scroll the chat five steps, while =C-p= / =C-n= go to the
+terminal like any other key, so they move through Claude's options and
+prompt history. When the app
 tracks the mouse (Claude Code's fullscreen renderer), its history lives
 inside the app and the buffer holds only the visible rows, so scrolling
 sends it wheel presses (button 4 up, 5 down) at the middle row. Claude
