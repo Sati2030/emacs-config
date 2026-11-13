@@ -477,7 +477,9 @@ reentrant call of Tramp" error. They still recheck on save and on newline.
 C# uses OmniSharp from a local build, LaTeX uses texlab, and clangd
 indexes in the background. Plain JavaScript also goes through
 typescript-language-server, which infers types from the bundled DOM
-definitions (so a WebGL context gets full member completion).
+definitions (so a WebGL context gets full member completion). GLSL
+goes through glslls (svenstaro/glsl-language-server), which is not in
+Homebrew and has to be built from source and put on =PATH=.
 
 #+begin_src emacs-lisp
 (use-package lsp-mode
@@ -489,7 +491,8 @@ definitions (so a WebGL context gets full member completion).
          (js-mode            . lsp-deferred)
          (js-ts-mode         . lsp-deferred)
          (typescript-ts-mode . lsp-deferred)
-         (tsx-ts-mode        . lsp-deferred))
+         (tsx-ts-mode        . lsp-deferred)
+         (glsl-mode          . lsp-deferred))
   :custom
   (lsp-headerline-breadcrumb-enable nil)
   (lsp-enable-on-type-formatting nil)
@@ -583,6 +586,16 @@ marks.
 #+end_src
 
 * Languages
+
+** GLSL
+
+=glsl-mode= picks up =.glsl=, =.vert=, =.frag= and friends, and gives
+syntax highlighting. The language server itself is hooked up under
+the lsp-mode section.
+
+#+begin_src emacs-lisp
+(use-package glsl-mode)
+#+end_src
 
 ** C / C++
 
