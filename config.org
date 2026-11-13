@@ -1127,6 +1127,26 @@ gives completion/suggestions. Grammars auto-install on first open if missing.
 (add-to-list 'auto-mode-alist '("\\.tsx\\'" . tsx-ts-mode))
 #+end_src
 
+** JavaScript
+
+Plain js-mode paints a whole backtick string with =font-lock-string-face=,
+including the code inside =${...}=. js-ts-mode parses each
+=template_substitution= as a real expression and only paints the literal
+text around it as string, so the substitutions take the same colors as
+normal code. Emacs 31 ships a pinned recipe for the javascript grammar in
+=treesit-language-source-alist=, so only the install is needed here.
+js-ts-mode also wants the =jsdoc= grammar (for =/** */= comments) and
+prompts on every open without it, so it is installed alongside.
+The lsp and template-literal-indent hooks already cover js-ts-mode.
+
+#+begin_src emacs-lisp
+(dolist (lang '(javascript jsdoc))
+  (unless (treesit-ready-p lang t)
+    (treesit-install-language-grammar lang)))
+
+(add-to-list 'major-mode-remap-alist '(js-mode . js-ts-mode))
+#+end_src
+
 ** Indenting code inside JavaScript template literals
 
 js-mode refuses to indent any line that starts inside a string
