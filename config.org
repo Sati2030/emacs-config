@@ -479,7 +479,11 @@ indexes in the background. Plain JavaScript also goes through
 typescript-language-server, which infers types from the bundled DOM
 definitions (so a WebGL context gets full member completion). GLSL
 goes through glslls (svenstaro/glsl-language-server), which is not in
-Homebrew and has to be built from source and put on =PATH=.
+Homebrew and has to be built from source and put on =PATH=. It reads
+the shader stage from the filename (=.vert=, =.frag=, ...), and it
+needs =--target-env opengl=, otherwise every WebGL declaration is
+flagged for missing SPIR-V locations. Start WebGL1 shaders with
+=#version 100=, or glslang assumes desktop GLSL 1.10.
 
 #+begin_src emacs-lisp
 (use-package lsp-mode
@@ -503,6 +507,9 @@ Homebrew and has to be built from source and put on =PATH=.
   (lsp-disabled-clients '(csharp-roslyn csharp-ls))
   (lsp-csharp-server-path (expand-file-name "~/dev/omnisharp/OmniSharp"))
   (lsp-tex-server 'texlab)
+  ;; glslls validates as Vulkan/SPIR-V by default, which demands
+  ;; layout(location=...) and bans plain uniforms. WebGL needs OpenGL rules.
+  (lsp-glsl-executable '("glslls" "--stdin" "--target-env" "opengl"))
   ;; Takes a list of keywords, not a boolean. A value of t signals
   ;; wrong-type-argument when clangd requests signature help.
   (lsp-signature-auto-activate '(:on-trigger-char :on-server-request))
