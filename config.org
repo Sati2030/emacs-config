@@ -2348,6 +2348,19 @@ new instance, and =C-c n= starts one in a new frame.
         (unless started
           (delete-frame frame)))))
 
+  ;; The MCP tools are read-only, so Claude acts on the live session (such
+  ;; as switching open buffers to a new major mode) through emacsclient,
+  ;; which needs the Emacs server. New, continue and resume all go through
+  ;; `claude-code-ide--start-session', so starting the server there covers
+  ;; every launch. It is a private function, so this may need updating if
+  ;; the package renames it.
+  (defun my/claude-ensure-server (&rest _)
+    (require 'server)
+    (unless (server-running-p)
+      (server-start)))
+
+  (advice-add 'claude-code-ide--start-session :before #'my/claude-ensure-server)
+
   (claude-code-ide-emacs-tools-setup))
 #+end_src
 
