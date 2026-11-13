@@ -1232,7 +1232,9 @@ window as the markdown preview, or in the external browser on builds
 without xwidget support. It opens the current file when that is an HTML
 page, and the root's =index.html= otherwise, so running it from a JS or
 CSS buffer still shows the site. Running it again stops the server and
-closes the window, and so does killing the =*live-server*= buffer.
+closes the window, and so does killing the =*live-server*= buffer. The
+page's own console output goes to a second buffer, =*frontend-console*=
+(see "Browser console in Emacs" below).
 
 live-server injects a small script that reloads the whole page on every
 save. A full reload gives scripts a fresh JavaScript realm each time,
@@ -1264,6 +1266,7 @@ lingers holding its port.
 
 #+begin_src emacs-lisp
 (require 'ansi-color)
+(require 'subr-x)                       ; string-trim, string-remove-suffix
 
 (defvar my/live-server-process nil
   "The running live-server process, if any.")
@@ -1320,33 +1323,63 @@ HTML page, else the root's index."
       (message "Starting %s in %s ..."
                (if npm "npm run dev" "live-server") root))))
 
+(defun my/frontend-preview--page-url (base page)
+  "URL of PAGE under the server at BASE.
+PAGE is a path relative to the served root, or nil for the index."
+  (concat (string-remove-suffix "/" base) "/"
+          (and page (mapconcat #'url-hexify-string
+                               (split-string page "/")
+                               "/"))))
+
 (defun my/live-server--filter (process string page)
-  "Log PROCESS's STRING, opening PAGE once live-server prints its URL.
+  "Log PROCESS's STRING and act on each \"Serving ... at URL\" line.
 PAGE is a path relative to the served root, or nil for the index."
   (let ((log (process-buffer process)))
     (when (buffer-live-p log)
       (with-current-buffer log
         (save-excursion
           (goto-char (point-max))
-          (insert (ansi-color-filter-apply string))
-          ;; Search the whole log, since the line can arrive in pieces.
-          (unless (process-get process 'preview-opened)
-            (goto-char (point-min))
-            (when (re-search-forward "Serving .* at \\(https?://[^[:space:]]+\\)"
-                                     nil t)
-              (process-put process 'preview-opened t)
-              (process-put
-               process 'preview
-               (my/show-url-in-side-window
-                (concat (match-string 1) "/"
-                        (and page (mapconcat #'url-hexify-string
-                                             (split-string page "/")
-                                             "/"))))))))))))
+          (insert (ansi-color-filter-apply string)))))
+    ;; Scan complete lines only, keeping the unfinished tail for the
+    ;; next call, since a line can arrive split across several calls.
+    (let ((lines (split-string
+                  (concat (or (process-get process 'partial) "") string)
+                  "\n")))
+      (process-put process 'partial (car (last lines)))
+      (dolist (line (butlast lines))
+        (let ((line (ansi-color-filter-apply line)))
+          (when (string-match "Serving .* at \\(https?://[^[:space:]]+\\)"
+                              line)
+            (my/frontend-preview--server-ready
+             process (match-string 1 line) page)))))))
+
+(defun my/frontend-preview--server-ready (server url page)
+  "Handle SERVER announcing that it listens at URL; PAGE is as above.
+The first announcement opens the preview, through the console proxy
+when that can run. Later ones come from the server restarting (for
+example under `node --watch', which picks a new port each time with
+PORT=0), and only repoint the proxy, so the open page keeps working."
+  (let ((proxy (process-get server 'proxy)))
+    (cond
+     ((process-live-p proxy)
+      (process-send-string proxy (concat url "\n")))
+     ((process-get server 'preview-opened))
+     (t
+      (process-put server 'preview-opened t)
+      (if (my/frontend-console-available-p)
+          (process-put server 'proxy
+                       (my/frontend-console--start server url page))
+        (process-put server 'preview
+                     (my/show-url-in-side-window
+                      (my/frontend-preview--page-url url page))))))))
 
 (defun my/live-server--sentinel (process event)
-  "Close PROCESS's preview once live-server has exited.
-Reports EVENT when live-server exits on its own rather than being stopped."
+  "Close PROCESS's proxy and preview once the dev server has exited.
+Reports EVENT when the server exits on its own rather than being stopped."
   (unless (process-live-p process)
+    (let ((proxy (process-get process 'proxy)))
+      (when (process-live-p proxy)
+        (delete-process proxy)))
     (let ((preview (process-get process 'preview)))
       (when (buffer-live-p preview)
         (let ((kill-buffer-query-functions nil))
@@ -1356,6 +1389,125 @@ Reports EVENT when live-server exits on its own rather than being stopped."
     (when (eq (process-status process) 'exit)
       (message "%s %s (see *live-server*)"
                (process-name process) (string-trim event)))))
+#+end_src
+
+*** Browser console in Emacs
+
+=*live-server*= shows only the server's side. The page's own
+=console.log= output and its errors happen inside the webview, and
+xwidget-webkit gives Emacs no access to its console, so the page has to
+send them out itself. Rather than ask every project to do that, Emacs
+puts a small reverse proxy between the preview and the dev server:
+=lisp/frontend-console-proxy.js=, which needs only Node and its built-in
+modules, so no project installs anything or knows the proxy exists.
+
+The proxy forwards every request unchanged, except that HTML responses
+get one =<script>= tag at the top of =<head>=. That script
+(=lisp/frontend-console-client.js=) wraps the =console= methods, listens
+for uncaught errors, unhandled promise rejections and failed resource
+loads, and sends batches back to the proxy with =navigator.sendBeacon=.
+The proxy prints them as =[level] text= lines, which land in
+=*frontend-console*=. Being first in =<head>= is what makes this better
+than injecting from Emacs after the page loads: it is installed before
+any page script runs, so module syntax errors and failed imports during
+load are caught too. Each reload starts with a =[page] loaded URL= line,
+so output from different reloads is easy to tell apart.
+
+WebSocket upgrades are piped through untouched, so reload and HMR
+clients that connect back to the page's origin keep working.
+live-server's reload script does that, and so does Vite's HMR. The
+=livereload= npm package talks to its own fixed port directly and never
+touches the proxy. The preview URL stays the proxy's for the whole
+session, and when the dev server restarts on a new port Emacs writes the
+new URL to the proxy's stdin.
+
+Without =node= on the =exec-path= (for live-server only projects on a
+machine without Node), the preview opens the server directly as before,
+just without the console buffer. Killing =*frontend-console*= kills the
+proxy, which breaks the open preview, so stop the whole preview with
+=my/frontend-preview= instead.
+
+#+begin_src emacs-lisp
+(defconst my/frontend-console-proxy-script
+  (expand-file-name "lisp/frontend-console-proxy.js" user-emacs-directory)
+  "Node script that proxies the dev server and collects browser logs.")
+
+(defvar my/frontend-console-font-lock-keywords
+  '(("^\\[error\\].*" . 'error)
+    ("^\\[warn\\].*" . 'warning)
+    ("^\\[page\\].*" . 'success)
+    ("^\\[\\(?:debug\\|proxy\\)\\].*" . 'shadow))
+  "Colors for *frontend-console* lines, keyed on their level prefix.")
+
+(define-derived-mode my/frontend-console-mode special-mode "Browser-Console"
+  "Major mode for the browser console log of `my/frontend-preview'."
+  (setq-local font-lock-defaults '(my/frontend-console-font-lock-keywords t)))
+
+(defun my/frontend-console-available-p ()
+  "Non-nil when the console proxy can run."
+  (and (executable-find "node")
+       (file-readable-p my/frontend-console-proxy-script)))
+
+(defun my/frontend-console--start (server url page)
+  "Start the console proxy in front of SERVER, listening at URL.
+The preview of PAGE opens once the proxy is ready. Returns the process."
+  (let ((buffer (get-buffer-create "*frontend-console*")))
+    (with-current-buffer buffer
+      (my/frontend-console-mode)
+      (let ((inhibit-read-only t))
+        (erase-buffer)))
+    (make-process
+     :name "frontend-console"
+     :buffer buffer
+     :command (list "node" my/frontend-console-proxy-script url)
+     :connection-type 'pipe
+     :noquery t
+     :filter (lambda (process string)
+               (my/frontend-console--filter process string server page))
+     :sentinel #'my/frontend-console--sentinel)))
+
+(defun my/frontend-console--filter (process string server page)
+  "Log PROCESS's STRING, opening SERVER's preview of PAGE once ready.
+Windows showing the end of the log follow new output, like a terminal."
+  (let ((buffer (process-buffer process)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (let ((following
+               (seq-filter (lambda (window)
+                             (= (window-point window) (point-max)))
+                           (get-buffer-window-list buffer nil t)))
+              (inhibit-read-only t))
+          (save-excursion
+            (goto-char (point-max))
+            (insert string)
+            ;; Search the whole log, since the line can arrive in pieces.
+            (unless (process-get process 'preview-opened)
+              (goto-char (point-min))
+              (when (re-search-forward
+                     "^Proxy for .* at \\(https?://[^[:space:]]+\\)" nil t)
+                (process-put process 'preview-opened t)
+                (my/frontend-console--open server (match-string 1) page buffer))))
+          (dolist (window following)
+            (set-window-point window (point-max))))))))
+
+(defun my/frontend-console--open (server proxy-url page console)
+  "Show SERVER's preview of PAGE through PROXY-URL, with CONSOLE below it."
+  (process-put server 'preview
+               (my/show-url-in-side-window
+                (my/frontend-preview--page-url proxy-url page)))
+  ;; Slot 1 of the right side stacks the console under the preview
+  ;; (slot 0) instead of taking a full width strip at the bottom.
+  (display-buffer console
+                  '(display-buffer-in-side-window
+                    (side . right)
+                    (slot . 1)
+                    (window-height . 0.3))))
+
+(defun my/frontend-console--sentinel (process event)
+  "Report EVENT when the console PROCESS exits on its own."
+  (when (eq (process-status process) 'exit)
+    (message "Console proxy %s (see *frontend-console*)"
+             (string-trim event))))
 #+end_src
 
 *** npm dev server (Next.js and other Node projects)
