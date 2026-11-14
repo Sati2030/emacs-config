@@ -9,10 +9,8 @@ Enables lexical binding for the tangled config.el.
 
 * Package management
 
-Package archives and =use-package= settings. Emacs activates installed
-packages before loading the init file and ships =use-package=, so
-neither needs bootstrapping. Every package below is installed and
-configured through =use-package=.
+Package archives and =use-package= settings. Missing packages are
+installed automatically.
 
 #+begin_src emacs-lisp
 (require 'package)
@@ -64,9 +62,7 @@ and the ESP-IDF variables match the terminal.
 ** Fix stale =LIBRARY_PATH= from the emacs-plus bundle
 
 Rebuilds =LIBRARY_PATH= from Homebrew's version-independent
-=gcc/current= path. emacs-plus hard-codes a versioned gcc path at build
-time, which no longer exists after a gcc upgrade and makes =ld= warn on
-every compile.
+=gcc/current= path.
 
 #+begin_src emacs-lisp
 (when *is-a-mac*
@@ -118,8 +114,7 @@ Starts every frame maximized.
 
 ** Theme
 
-Loads =doom-one= and replaces its =region= face with a higher-contrast
-color that stays readable on the transparent background.
+Loads =doom-one= with a higher-contrast =region= face.
 
 #+begin_src emacs-lisp
 (use-package doom-themes
@@ -143,8 +138,8 @@ Pulses the cursor line after large vertical jumps.
 
 ** Right-to-left rendering
 
-Forces left-to-right paragraphs and skips bidirectional bracket
-analysis, which speeds up redisplay.
+Forces left-to-right paragraphs and disables bidirectional bracket
+analysis.
 
 #+begin_src emacs-lisp
 (setq-default bidi-paragraph-direction 'left-to-right)
@@ -190,8 +185,7 @@ and keywords.
 Frame transparency through =NSGlassEffectView=, using
 =~/.emacs.d/lisp/lr-macos-glass.el= (from
 https://github.com/larrasket/emacs-liquid-glass). Requires the patched
-=emacs-plus@31= build and macOS 26+, since =alpha-background= has no
-effect on macOS.
+=emacs-plus@31= build and macOS 26+.
 
 #+begin_src emacs-lisp
 (eval-and-compile
@@ -266,10 +260,8 @@ Project detection, file finding and search, under the =C-c p= prefix.
 
 ** Let project.el use projectile's roots
 
-Registers projectile projects with the built-in =project.el=, so tools
-built on =project-root= (such as the claude-code-ide MCP =project-info=)
-recognize them. The result is a =transient= project, which includes all
-files under the root, tracked or not.
+Registers projectile roots with =project.el= as =transient= projects,
+which include every file under the root.
 
 #+begin_src emacs-lisp
 (defun my/project-projectile (dir)
@@ -278,7 +270,7 @@ files under the root, tracked or not.
     (cons 'transient root)))
 
 (with-eval-after-load 'project
-  ;; Appended, so the built-in VCS backend takes precedence.
+  ;; Appended, so the VCS backend is tried first.
   (add-to-list 'project-find-functions #'my/project-projectile t))
 #+end_src
 
@@ -315,8 +307,7 @@ Remembers recently opened files across sessions, which feeds
 
 ** Remote (TRAMP) save performance
 
-Reduces the remote calls made per save over TRAMP. Each call blocks the
-UI until it returns.
+Reduces the remote calls made per save over TRAMP.
 
 #+begin_src emacs-lisp
 ;; Skip VC backend detection for remote files (no git state in their mode line).
@@ -331,8 +322,7 @@ UI until it returns.
        (normal-backup-enable-predicate name)))
 (setq backup-enable-predicate #'my/backup-enable-predicate)
 
-;; Cache remote file attributes for 60s (default 10). Changes made by other
-;; processes on the remote side appear later.
+;; Cache remote file attributes for 60s (default 10).
 (setq remote-file-name-inhibit-cache 60)
 
 ;; Give up on an unresponsive connection after 10s (default 60).
@@ -341,12 +331,10 @@ UI until it returns.
 
 ** Remote (TRAMP) debugging
 
-TRAMP logs at its default level 3. =my/tramp-debug-toggle= switches to
-level 6, which logs all traffic to and from the remote end and mirrors
-each =*debug tramp/...*= buffer to a file under
-=temporary-file-directory=, so the log survives a force quit. Level 6
-adds latency to every TRAMP call. Toggling closes cached connections so
-the next one is logged from the handshake.
+=my/tramp-debug-toggle= switches TRAMP logging between level 3 and
+level 6. Level 6 logs all remote traffic and mirrors each
+=*debug tramp/...*= buffer to a file under =temporary-file-directory=.
+Toggling closes cached connections.
 
 #+begin_src emacs-lisp
 (setq tramp-verbose 3
@@ -354,8 +342,7 @@ the next one is logged from the handshake.
 
 (defun my/tramp-debug-toggle ()
   "Toggle verbose TRAMP logging to debug buffers and to disk.
-Closes cached connections so the next one is logged from the handshake up.
-Open remote buffers reconnect on their next access."
+Closes cached connections."
   (interactive)
   (require 'tramp)
   (setq tramp-verbose (if (> tramp-verbose 3) 3 6)
@@ -369,9 +356,8 @@ Open remote buffers reconnect on their next access."
 
 ** Freeze debugging: CPU profiler
 
-=my/profiler-toggle= starts the sampling CPU profiler, or stops it and
-opens the report. Covers freezes in Elisp that the TRAMP log does not
-record.
+=my/profiler-toggle= starts the CPU profiler, or stops it and opens the
+report.
 
 #+begin_src emacs-lisp
 (defun my/profiler-toggle ()
@@ -411,8 +397,7 @@ In-buffer completion popup, enabled globally with no idle delay.
 
 ** Yasnippet
 
-Snippet expansion. lsp-mode uses it to insert completion placeholders,
-such as a function's arguments.
+Snippet expansion, also used by lsp-mode for completion placeholders.
 
 #+begin_src emacs-lisp
 (use-package yasnippet
@@ -434,7 +419,7 @@ terminal program instead of the Emacs buffer.
   (vterm-max-scrollback 100000)
   :config
   (defun my/vterm-backward-kill-word ()
-    "Send M-DEL, which readline and the Claude CLI treat as backward-kill-word."
+    "Send M-DEL (backward-kill-word in readline)."
     (interactive)
     (vterm-send-key "<backspace>" nil t nil))
   (define-key vterm-mode-map (kbd "s-<backspace>") #'my/vterm-backward-kill-word)
@@ -455,9 +440,8 @@ Shows the current directory in the =M-!= prompt.
 
 On-the-fly syntax checking. lsp-mode reports its diagnostics through it.
 
-Remote buffers drop the =idle-change= trigger, since its timer can fire
-while a save is blocked in TRAMP and freeze Emacs with a "Forbidden
-reentrant call of Tramp" error. They still recheck on save and on newline.
+Remote buffers are checked on save and newline only, not on idle
+change.
 
 #+begin_src emacs-lisp
 (use-package flycheck
@@ -474,16 +458,12 @@ reentrant call of Tramp" error. They still recheck on save and on newline.
 
 ** lsp-mode
 
-C# uses OmniSharp from a local build, LaTeX uses texlab, and clangd
-indexes in the background. Plain JavaScript also goes through
-typescript-language-server, which infers types from the bundled DOM
-definitions (so a WebGL context gets full member completion). GLSL
-goes through glslls (svenstaro/glsl-language-server), which is not in
-Homebrew and has to be built from source and put on =PATH=. It reads
-the shader stage from the filename (=.vert=, =.frag=, ...), and it
-needs =--target-env opengl=, otherwise every WebGL declaration is
-flagged for missing SPIR-V locations. Start WebGL1 shaders with
-=#version 100=, or glslang assumes desktop GLSL 1.10.
+Servers: OmniSharp (local build) for C#, texlab for LaTeX, clangd with
+background indexing for C/C++, typescript-language-server for JS and
+TS, and glslls for GLSL. glslls (svenstaro/glsl-language-server) is
+built from source and must be on =PATH=. It takes the shader stage from
+the file extension and validates against OpenGL rules. WebGL1 shaders
+need =#version 100=.
 
 #+begin_src emacs-lisp
 (use-package lsp-mode
@@ -507,11 +487,9 @@ flagged for missing SPIR-V locations. Start WebGL1 shaders with
   (lsp-disabled-clients '(csharp-roslyn csharp-ls))
   (lsp-csharp-server-path (expand-file-name "~/dev/omnisharp/OmniSharp"))
   (lsp-tex-server 'texlab)
-  ;; glslls validates as Vulkan/SPIR-V by default, which demands
-  ;; layout(location=...) and bans plain uniforms. WebGL needs OpenGL rules.
+  ;; Validate GLSL against OpenGL rules instead of Vulkan/SPIR-V.
   (lsp-glsl-executable '("glslls" "--stdin" "--target-env" "opengl"))
-  ;; Takes a list of keywords, not a boolean. A value of t signals
-  ;; wrong-type-argument when clangd requests signature help.
+  ;; Show signatures on trigger characters and server requests.
   (lsp-signature-auto-activate '(:on-trigger-char :on-server-request))
   (lsp-signature-render-documentation nil))
 #+end_src
@@ -531,10 +509,8 @@ flagged for missing SPIR-V locations. Start WebGL1 shaders with
 
 ** Signature help
 
-Shows function signatures in a =posframe= child frame at point, instead
-of a line at the bottom of the frame. It opens automatically when typing
-a trigger character such as =(= or =,=, and manually anywhere with
-=C-c s= (lsp-mode's default =C-S-SPC= is taken by macOS input switching).
+Shows function signatures in a =posframe= at point. Opens on trigger
+characters such as =(= and =,=, or manually with =C-c s=.
 
 #+begin_src emacs-lisp
 (use-package posframe)
@@ -571,11 +547,10 @@ checks the word at point.
 
 ** langtool
 
-Grammar and style checking through the LanguageTool command line
-(=brew install languagetool=), in British English to match ispell.
-=M-x langtool-check= marks issues, =langtool-correct-buffer= steps
-through them with suggested fixes, and =langtool-check-done= clears the
-marks.
+Grammar and style checking through LanguageTool
+(=brew install languagetool=), in British English. =M-x langtool-check=
+marks issues, =langtool-correct-buffer= steps through fixes, and
+=langtool-check-done= clears the marks.
 
 #+begin_src emacs-lisp
 (use-package langtool
@@ -616,11 +591,9 @@ the lsp-mode section.
 
 *** ESP-IDF / PlatformIO clangd
 
-Inside ESP-IDF (=sdkconfig=) or PlatformIO (=platformio.ini=) projects,
-uses the newest installed Espressif clangd, which supports the Xtensa
-and RISC-V targets, and lets it query the PlatformIO cross-compilers.
-Other C/C++ projects, or ESP projects without an Espressif clangd, use
-the clangd on =PATH=.
+In ESP-IDF (=sdkconfig=) or PlatformIO (=platformio.ini=) projects,
+uses the newest installed Espressif clangd and lets it query the
+PlatformIO cross-compilers. Other projects use the clangd on =PATH=.
 
 #+begin_src emacs-lisp
 (defun my/esp-project-p ()
@@ -639,7 +612,7 @@ the clangd on =PATH=.
   "Point clangd at Espressif's build and toolchains in ESP projects."
   (when-let* (((my/esp-project-p))
               (clangd (my/esp-clangd)))
-    ;; Defines the clangd options; this hook runs before lsp-mode loads.
+    ;; Loads the clangd option definitions.
     (require 'lsp-clangd)
     (setq-local lsp-clients-clangd-executable clangd)
     (setq-local lsp-clients-clangd-args
@@ -675,12 +648,9 @@ run command to =idf.py flash monitor=.
 *** Reload PlatformIO compile_commands.json for clangd
 
 =my/pio-reload-compile-commands= regenerates =compile_commands.json=
-with =pio run -t compiledb= and restarts the LSP workspace, so clangd
-sees newly added =lib/= folders. It builds the =default_envs= from
-=platformio.ini=, so no env name is hardcoded here. With =C-u= it asks
-for one of the file's =[env:NAME]= sections instead, since each env
-compiles different sources (a file outside the chosen env's
-=build_src_filter= gets no flags).
+with =pio run -t compiledb= for the =default_envs= of =platformio.ini=,
+then restarts the LSP workspace. With =C-u= it prompts for an
+=[env:NAME]= instead.
 
 #+begin_src emacs-lisp
 (defun my/pio-envs ()
@@ -701,10 +671,9 @@ shown only if the build fails."
    (list (and current-prefix-arg
               (completing-read "PlatformIO env: " (my/pio-envs) nil t))))
   (let* ((default-directory (my/project-root))
-         ;; Captured here, since the sentinel runs in the process buffer,
-         ;; which has no LSP workspace.
+         ;; LSP workspaces of the calling buffer.
          (workspaces (and (fboundp 'lsp-workspaces) (lsp-workspaces)))
-         ;; Leading space keeps the buffer out of buffer lists.
+         ;; Leading space hides the buffer from buffer lists.
          (buf (get-buffer-create " *pio-compiledb*")))
     (when (process-live-p (get-buffer-process buf))
       (user-error "pio compiledb is already running"))
@@ -830,29 +799,16 @@ loading pdf-tools until the first PDF is opened.
 
 *** Live preview via impatient-mode + pandoc
 
-=C-c C-c l= (=my/markdown-preview-toggle=, in place of markdown-mode's
-eww-based live preview) serves the buffer over a local HTTP server,
-rendered to HTML by pandoc with MathJax, and updates the page once
-typing pauses. The preview opens in an =xwidget-webkit= side window, or
-in the external browser on builds without xwidget support. Toggling it
-off stops serving the buffer, closes the xwidget window, and stops the
-server once no buffer is being served.
+=C-c C-c l= (=my/markdown-preview-toggle=) serves the buffer through
+impatient-mode as HTML rendered by pandoc with MathJax, shown in an
+=xwidget-webkit= side window (or the external browser without xwidget
+support). Toggling off stops serving the buffer, closes the window, and
+stops the server once no buffer is served.
 
-pandoc takes about a quarter second to start, so it runs as an
-asynchronous process and typing never waits for it. impatient-mode
-would render on every change by calling its filter synchronously, so
-its change hook is swapped for one that schedules a background render
-once typing pauses. The filter only prints the HTML of the last
-finished render, and the render's sentinel pushes that HTML to the
-page.
-
-Only one render runs per buffer. An edit made while one is running
-marks it stale, and it reruns once it finishes. Killing the old render
-on every edit instead would never let one finish while you type
-steadily.
-
-Two of the calls are impatient-mode internals, =imp--on-change= and
-=imp--update-buffer=, so an update to the package could break them.
+pandoc runs asynchronously after =my/imp-render-delay= idle seconds,
+replacing impatient-mode's change hook. One render runs per buffer; an
+edit made during a render reruns it when it finishes. Uses the
+impatient-mode internals =imp--on-change= and =imp--update-buffer=.
 
 #+begin_src emacs-lisp
 (use-package simple-httpd)
@@ -893,7 +849,6 @@ If a render is already running, mark it stale so it reruns when done."
              :name "pandoc"
              :buffer output
              :stderr errors
-             ;; A pty line buffers its input and can cut a long buffer short.
              :connection-type 'pipe
              :coding 'utf-8
              :noquery t
@@ -937,8 +892,7 @@ ERRORS is shown."
 Meant for `after-change-functions'."
   (unless my/imp--timer
     (setq my/imp--timer
-          ;; A change made while already idle, such as a revert, would
-          ;; otherwise wait for the next idle period, so count from now.
+          ;; Count the delay from now, even if Emacs is already idle.
           (run-with-idle-timer
            (time-add (or (current-idle-time) 0) my/imp-render-delay)
            nil #'my/imp--scheduled-render (current-buffer)))))
@@ -956,8 +910,7 @@ Meant for `after-change-functions'."
   (when my/imp--timer
     (cancel-timer my/imp--timer)
     (setq my/imp--timer nil))
-  ;; Forget the process before killing it, since `delete-process' runs
-  ;; the sentinel right away and it would report the kill as a failure.
+  ;; Cleared before killing, so the sentinel ignores the process.
   (let ((process my/imp--process))
     (setq my/imp--process nil
           my/imp--stale nil
@@ -977,16 +930,16 @@ Meant for `after-change-functions'."
   "Show URL in a right side window and return its xwidget buffer.
 Without xwidget support URL opens in the external browser and the
 return value is nil. The selected window and current buffer are left
-as they were, so this is safe to call from a process filter."
+as they were."
   (if (not (featurep 'xwidget-internal))
       (progn (browse-url url) nil)
     (let ((window (selected-window))
           (shown (window-buffer)))
       (save-current-buffer
-        ;; A new session per preview, so each preview gets its own buffer.
+        ;; New session, so each preview gets its own buffer.
         (xwidget-webkit-browse-url url t)
         (let ((preview (current-buffer)))
-          ;; Browsing took over the selected window, so give it back.
+          ;; Restore the selected window's buffer.
           (set-window-buffer window shown)
           (display-buffer preview
                           '(display-buffer-in-side-window
@@ -1027,10 +980,8 @@ The server stops too once no buffer is being served."
 
 *** Scrolling the impatient preview with normal keys
 
-Keyboard scrolling for =xwidget-webkit= that targets impatient-mode's
-=#content= iframe, falling back to the page's own window. The stock
-commands scroll the outer page, which never overflows on an impatient
-preview.
+Keyboard scrolling for =xwidget-webkit= that scrolls impatient-mode's
+=#content= iframe, or the page's own window when there is none.
 
 #+begin_src emacs-lisp
 (defun my/xwidget-scroll-js (expr)
@@ -1094,13 +1045,9 @@ var w=(f&&f.contentWindow)?f.contentWindow:window;%s})();" expr)))
 
 *** Reloading the impatient preview from disk
 
-The preview renders the markdown buffer, not the file, so reloading the
-page (=xwidget-webkit-reload=) shows the same text again when another
-program has changed the file. =r= in a preview instead reverts its
-source buffer, and the revert's change hook re-renders the preview. The
-source keeps its modes, so impatient-mode and that hook survive, and a
-source with unsaved edits is left alone. In any other xwidget buffer
-=r= still reloads the page.
+=r= in a preview reverts its source buffer from disk, which re-renders
+the preview. A source with unsaved edits is left alone. In other
+xwidget buffers =r= reloads the page.
 
 #+begin_src emacs-lisp
 (defun my/imp-preview-source ()
@@ -1129,8 +1076,8 @@ source with unsaved edits is left alone. In any other xwidget buffer
 
 ** TypeScript / TSX
 
-Tree-sitter modes give syntax coloring; lsp-mode (typescript-language-server)
-gives completion/suggestions. Grammars auto-install on first open if missing.
+Tree-sitter modes for =.ts= and =.tsx=. Missing grammars are installed
+at startup.
 
 #+begin_src emacs-lisp
 (dolist (source '((typescript "https://github.com/tree-sitter/tree-sitter-typescript"
@@ -1149,15 +1096,9 @@ gives completion/suggestions. Grammars auto-install on first open if missing.
 
 ** JavaScript
 
-Plain js-mode paints a whole backtick string with =font-lock-string-face=,
-including the code inside =${...}=. js-ts-mode parses each
-=template_substitution= as a real expression and only paints the literal
-text around it as string, so the substitutions take the same colors as
-normal code. Emacs 31 ships a pinned recipe for the javascript grammar in
-=treesit-language-source-alist=, so only the install is needed here.
-js-ts-mode also wants the =jsdoc= grammar (for =/** */= comments) and
-prompts on every open without it, so it is installed alongside.
-The lsp and template-literal-indent hooks already cover js-ts-mode.
+Remaps =js-mode= to =js-ts-mode=, which highlights =${...}= inside
+template literals as code. Installs the =javascript= and =jsdoc=
+grammars when missing.
 
 #+begin_src emacs-lisp
 (dolist (lang '(javascript jsdoc))
@@ -1169,20 +1110,15 @@ The lsp and template-literal-indent hooks already cover js-ts-mode.
 
 ** Indenting code inside JavaScript template literals
 
-js-mode refuses to indent any line that starts inside a string
-(=js-indent-line= is wrapped in =(unless (nth 3 parse-status) ...)=),
-so =TAB= does nothing in a multi-line backtick string such as a WebGL
-shader. This runs before the mode's own indenter and handles only
-those lines, using C-style brace counting:
+Indents lines inside multi-line template literals (such as WebGL
+shaders) by brace counting, before the mode's own indenter:
 
 - base column is the indentation of the line holding the opening backtick
 - each unclosed ={= inside the literal adds one =js-indent-level=
 - a line starting with =}= sits one level shallower
 - the line with the closing backtick returns to the base column
 
-Every other line falls through to the normal JS indenter. js-mode
-already lists ={= and =}= in =electric-indent-chars=, so =RET= and
-typing =}= reindent automatically too.
+Other lines use the normal JS indenter.
 
 #+begin_src emacs-lisp
 (defun my/js-template-literal-indent-line ()
@@ -1207,7 +1143,7 @@ Return non-nil when the line was handled, nil to defer to the mode."
                           base
                         (+ base (* step (1+ (max 0 depth))))))
               (offset (- (point) (save-excursion (back-to-indentation) (point)))))
-          ;; Spaces only: the indentation is part of the string's text.
+          ;; Indent with spaces only.
           (let ((indent-tabs-mode nil))
             (indent-line-to target))
           (when (> offset 0) (forward-char offset))))
@@ -1226,43 +1162,23 @@ Return non-nil when the line was handled, nil to defer to the mode."
 
 *** Static pages via live-server
 
-=M-x my/frontend-preview= runs the =live-server= npm dev server in the
-project root and shows the page in the same =xwidget-webkit= side
-window as the markdown preview, or in the external browser on builds
-without xwidget support. It opens the current file when that is an HTML
-page, and the root's =index.html= otherwise, so running it from a JS or
-CSS buffer still shows the site. Running it again stops the server and
-closes the window, and so does killing the =*live-server*= buffer. The
-page's own console output goes to a second buffer, =*frontend-console*=
-(see "Browser console in Emacs" below).
-
-live-server injects a small script that reloads the whole page on every
-save. A full reload gives scripts a fresh JavaScript realm each time,
-which matters for ES modules (they run only once per realm) and for
-WebGL (no stale contexts or leftover animation loops).
-
-=--port=0= lets the OS pick a free port, so it never clashes with the
-simple-httpd server behind the markdown preview. The real URL comes
-from the "Serving ... at URL" line live-server prints once it is
-listening, so the page opens as soon as the server is ready rather
-than after a fixed delay. Requires:
+=M-x my/frontend-preview= toggles a dev server in the project root and
+shows the page in an =xwidget-webkit= side window (or the external
+browser). It runs =live-server --port=0= and opens the current file
+when it is an HTML page, else the root's =index.html=. Killing
+=*live-server*= also stops it. Page console output goes to
+=*frontend-console*= (see "Browser console in Emacs" below). The page
+opens when the server prints its "Serving ... at URL" line. Requires:
 
 #+begin_example
 npm i -g live-server
 #+end_example
 
-When the project root has a =package.json= with a =dev= script, the
-command runs =npm run dev= instead, so projects with their own Node
-server (Express and the like) preview through that server. The contract
-is the same as live-server's: the script must honor the =PORT=
-environment variable (=0= meaning any free port) and print a line of
-the form =Serving <something> at <URL>= once it listens. Live reload is
-then the server's job (for example =livereload= plus
-=connect-livereload=). The page opened is the root URL, since Emacs
-cannot know how the server maps files to routes. Stopping works on the
-whole process tree, because Emacs starts the child as its own process
-group and signals the group, so the Node server behind npm never
-lingers holding its port.
+When =package.json= has a =dev= script, =npm run dev= runs instead and
+the root URL opens. The script must honor the =PORT= environment
+variable (=0= for any free port) and print =Serving <something> at
+<URL>= once listening. Stopping kills the server's whole process
+group.
 
 #+begin_src emacs-lisp
 (require 'ansi-color)
@@ -1340,8 +1256,7 @@ PAGE is a path relative to the served root, or nil for the index."
         (save-excursion
           (goto-char (point-max))
           (insert (ansi-color-filter-apply string)))))
-    ;; Scan complete lines only, keeping the unfinished tail for the
-    ;; next call, since a line can arrive split across several calls.
+    ;; Scan complete lines; keep the unfinished tail for the next call.
     (let ((lines (split-string
                   (concat (or (process-get process 'partial) "") string)
                   "\n")))
@@ -1356,9 +1271,7 @@ PAGE is a path relative to the served root, or nil for the index."
 (defun my/frontend-preview--server-ready (server url page)
   "Handle SERVER announcing that it listens at URL; PAGE is as above.
 The first announcement opens the preview, through the console proxy
-when that can run. Later ones come from the server restarting (for
-example under `node --watch', which picks a new port each time with
-PORT=0), and only repoint the proxy, so the open page keeps working."
+when available. Later ones repoint the proxy."
   (let ((proxy (process-get server 'proxy)))
     (cond
      ((process-live-p proxy)
@@ -1393,39 +1306,19 @@ Reports EVENT when the server exits on its own rather than being stopped."
 
 *** Browser console in Emacs
 
-=*live-server*= shows only the server's side. The page's own
-=console.log= output and its errors happen inside the webview, and
-xwidget-webkit gives Emacs no access to its console, so the page has to
-send them out itself. Rather than ask every project to do that, Emacs
-puts a small reverse proxy between the preview and the dev server:
-=lisp/frontend-console-proxy.js=, which needs only Node and its built-in
-modules, so no project installs anything or knows the proxy exists.
+=lisp/frontend-console-proxy.js= (Node, no dependencies) is a reverse
+proxy between the preview and the dev server. It forwards requests
+unchanged and injects =lisp/frontend-console-client.js= at the top of
+each HTML =<head>=. That script reports console calls, uncaught errors,
+unhandled rejections and failed resource loads, which the proxy prints
+as =[level] text= lines in =*frontend-console*=. Each reload starts with
+a =[page] loaded URL= line. WebSocket upgrades pass through unchanged.
+When the dev server restarts on a new port, Emacs sends the new URL to
+the proxy's stdin.
 
-The proxy forwards every request unchanged, except that HTML responses
-get one =<script>= tag at the top of =<head>=. That script
-(=lisp/frontend-console-client.js=) wraps the =console= methods, listens
-for uncaught errors, unhandled promise rejections and failed resource
-loads, and sends batches back to the proxy with =navigator.sendBeacon=.
-The proxy prints them as =[level] text= lines, which land in
-=*frontend-console*=. Being first in =<head>= is what makes this better
-than injecting from Emacs after the page loads: it is installed before
-any page script runs, so module syntax errors and failed imports during
-load are caught too. Each reload starts with a =[page] loaded URL= line,
-so output from different reloads is easy to tell apart.
-
-WebSocket upgrades are piped through untouched, so reload and HMR
-clients that connect back to the page's origin keep working.
-live-server's reload script does that, and so does Vite's HMR. The
-=livereload= npm package talks to its own fixed port directly and never
-touches the proxy. The preview URL stays the proxy's for the whole
-session, and when the dev server restarts on a new port Emacs writes the
-new URL to the proxy's stdin.
-
-Without =node= on the =exec-path= (for live-server only projects on a
-machine without Node), the preview opens the server directly as before,
-just without the console buffer. Killing =*frontend-console*= kills the
-proxy, which breaks the open preview, so stop the whole preview with
-=my/frontend-preview= instead.
+Without =node=, the preview opens the server directly, with no console
+buffer. Killing =*frontend-console*= kills the proxy and breaks the
+preview; stop it with =my/frontend-preview= instead.
 
 #+begin_src emacs-lisp
 (defconst my/frontend-console-proxy-script
@@ -1480,7 +1373,7 @@ Windows showing the end of the log follow new output, like a terminal."
           (save-excursion
             (goto-char (point-max))
             (insert string)
-            ;; Search the whole log, since the line can arrive in pieces.
+            ;; Search the whole log for the ready line.
             (unless (process-get process 'preview-opened)
               (goto-char (point-min))
               (when (re-search-forward
@@ -1495,8 +1388,7 @@ Windows showing the end of the log follow new output, like a terminal."
   (process-put server 'preview
                (my/show-url-in-side-window
                 (my/frontend-preview--page-url proxy-url page)))
-  ;; Slot 1 of the right side stacks the console under the preview
-  ;; (slot 0) instead of taking a full width strip at the bottom.
+  ;; Slot 1 stacks the console under the preview (slot 0).
   (display-buffer console
                   '(display-buffer-in-side-window
                     (side . right)
@@ -1540,7 +1432,7 @@ Runs `npm install' first when node_modules is missing."
         (message "node_modules missing, running npm install first...")
         (call-process "npm" nil "*npm-install*" t "install"))
       (async-shell-command "npm run dev" "*next-dev*")
-      ;; Give the server time to start listening before opening the page.
+      ;; Open the page after 5 seconds.
       (run-at-time 5 nil open-fn url)
       (message "Starting dev server in %s ..." dir))))
 
@@ -1598,10 +1490,6 @@ Global editing commands and their bindings.
 (global-set-key (kbd "C-c ,") #'scroll-down-line)
 (global-set-key (kbd "C-c .") #'scroll-up-line)
 
-;; `backward-word' skips any non-word characters before it looks for a
-;; word, newlines included. On a line holding only "// " it would run
-;; back onto the previous line and eat its last word too, so the jump
-;; is clamped to the start of the current line.
 (defun my/backward-kill-word-on-line ()
   "Like `backward-kill-word', but stop at the start of the line.
 At the start of a line, delete the preceding newline instead."
@@ -1635,9 +1523,7 @@ At the start of a line, delete the preceding newline instead."
 (global-set-key (kbd "C-SPC") #'my/set-or-deactivate-mark)
 
 (defun my/move-lines (command n)
-  "Run COMMAND with N, honouring any active remapping of it.
-This lets `xwidget-webkit-mode' remaps scroll the page instead of
-moving point."
+  "Run COMMAND with N, honouring any active remapping of it."
   (funcall (or (command-remapping command) command) n))
 
 (defun my/next-line-5 ()
@@ -1662,10 +1548,8 @@ out side by side.
 
 ** Semester calendar
 
-Dates for the current semester, taken from the QUT academic calendar.
-Update these four values at the start of each semester and the start
-page works out the week by itself. Break weeks are skipped when
-counting, so the number matches QUT's own week numbering.
+Dates for the current semester, from the QUT academic calendar. Break
+weeks are skipped when counting weeks.
 
 #+begin_src emacs-lisp
 (defvar my/qut-semester-name "Semester 2")
@@ -1697,13 +1581,9 @@ counting, so the number matches QUT's own week numbering.
 
 ** Dashboard
 
-=grid= (by the author of =enlight=) places several menus in one row,
-so all groups fit on screen at once. It is not on MELPA, hence =:vc=.
-
-=enlight-content= is a plain string, so anything computed in it (the
-date, the week) is frozen at the moment it is set. =my/enlight=
-rebuilds it before showing the buffer, which keeps the header current
-both at startup and when reopened with =M-x my/enlight-open=.
+=grid= (installed with =:vc=) lays the menus out in one row.
+=my/enlight= rebuilds =enlight-content= each time the page is shown, at
+startup or with =M-x my/enlight-open=.
 
 Keys: lowercase opens a unit's documents in =~/Documents/QUT=, the
 matching uppercase opens its code in =~/dev/QUT=.
@@ -1733,9 +1613,7 @@ matching uppercase opens its code in =~/dev/QUT=.
                    'face 'font-lock-comment-face)))))
 
 (defun my/enlight--center (text width)
-  "Indent every line of TEXT equally so the block is centred in WIDTH.
-A shared indent, rather than centring line by line, keeps the ASCII
-art intact."
+  "Indent every line of TEXT equally so the block is centred in WIDTH."
   (let* ((lines (split-string text "\n"))
          (pad (make-string
                (max 0 (/ (- width (seq-max (mapcar #'string-width lines))) 2))
@@ -1804,43 +1682,17 @@ art intact."
 
 ** Banner shimmer
 
-While the start page is the selected window, a band of light sweeps
-across the banner every few seconds. The minibuffer counts as being
-on the page when it was opened from there, so =C-x C-f= or =M-x= on
-the start page keeps it going. As soon as you select another window,
-or hide the page, the loop stops, so it costs nothing while you work.
-It starts again when the page is selected.
+A band of light sweeps across the banner every few seconds while the
+start page is in the selected window, or the minibuffer was opened from
+it. The loop stops when another window is selected or the page is
+hidden, and buffer local =window-buffer-change-functions= and
+=window-selection-change-functions= hooks restart it.
 
-The banner text is tagged with a =my/enlight-banner= property in
-=my/enlight-build=. After enlight inserts its content, every tagged
-character gets its own overlay, and a timer recolours those overlays
-=my/enlight-shimmer-fps= times a second. Overlays sit on top of the
-text without modifying it, so the read only buffer is never touched
-and stopping is just deleting them. They also evaporate if enlight
-redraws the buffer, and the redraw starts a fresh shimmer.
-
-The band's position comes from the time elapsed rather than a frame
-counter, so its speed stays steady even when some frames run late.
-
-Each frame is kept as cheap as possible, because a timer competes
-with typing and redisplay:
-
-- Brightness is rounded to =my/enlight-shimmer-levels= steps, and the
-  face for each step is built once when the shimmer starts. Frames
-  then allocate no new colours or face specs, which keeps garbage
-  collection quiet, and Emacs only ever has to realise that handful
-  of faces.
-- Each overlay remembers its step, and is only touched when the step
-  changes. Only the few dozen characters under the band change per
-  frame, so redisplay has little to redo, and nothing at all during
-  the rest between sweeps.
-- A frame is skipped while input is pending, so a keystroke never
-  waits for the animation.
-
-A buffer local =window-buffer-change-functions= hook runs when a
-window starts showing the page, and a buffer local
-=window-selection-change-functions= hook runs when a window showing
-it is selected. Either one restarts the shimmer.
+Each banner character (tagged =my/enlight-banner= in =my/enlight-build=)
+gets an overlay, recoloured =my/enlight-shimmer-fps= times a second. The
+band's position comes from elapsed time. Brightness is rounded to
+=my/enlight-shimmer-levels= prebuilt faces, an overlay is updated only
+when its step changes, and frames are skipped while input is pending.
 
 #+begin_src emacs-lisp
 (require 'color)
@@ -1890,7 +1742,7 @@ Step 0 is nil, so the banner's own face shows through."
 
 (defun my/enlight--band (distance)
   "Brightness of a column DISTANCE columns from the band's centre.
-A cosine curve gives soft edges instead of a hard bar."
+Falls off along a cosine curve."
   (if (>= distance my/enlight-shimmer-radius)
       0
     (/ (1+ (cos (/ (* float-pi distance) my/enlight-shimmer-radius))) 2)))
@@ -1982,9 +1834,7 @@ Nothing happens when either colour is unknown, as on some terminals."
                                 (time-add nil my/enlight-shimmer-delay))))))))
 
 (defun my/enlight--shimmer-resume (window)
-  "Restart the shimmer when WINDOW, showing the start page, is selected.
-Emacs also runs this when WINDOW stops showing the page, so check
-that the page is still there."
+  "Restart the shimmer when WINDOW, showing the start page, is selected."
   (when (and (not my/enlight--shimmer-timer)
              (eq window (selected-window)))
     (with-current-buffer (window-buffer window)
@@ -1996,56 +1846,28 @@ that the page is still there."
 
 ** Matrix rain
 
-Green code falls down the start page behind the dashboard, in the
-style of the film's "digital rain".
+Green falling code drawn into the empty parts of the start page,
+behind the dashboard. Each frame updates overlays without modifying the
+buffer:
 
-Emacs has no layers: each screen cell is a buffer character or
-nothing. So the rain is drawn only into the empty parts of the page,
-and the dashboard wins wherever it has text, which reads as the rain
-passing behind it. Every frame recolours a few overlays, again
-without touching the read only buffer:
+- runs of spaces get a same-width =display= string of rain characters,
+- a =before-string= past each line's end fills the row to the window's
+  edge, and the last line's one also fills the rows below,
+- enlight's centring =line-prefix= is turned off and replaced by margin
+  strings of the same width.
 
-- runs of spaces get a =display= string of the same width, made of
-  rain characters,
-- past the end of each line, a =before-string= fills the row up to
-  the window's edge, and the last line's one also carries the rows
-  below the content,
-- the left margin is the tricky part. enlight centres the page with a
-  =line-prefix= stretch, which is not text and cannot be drawn into,
-  so while the rain runs that prefix is turned off and each line gets
-  a margin string of the same width instead.
+Gaps narrower than =my/enlight-rain-min-gap=, and the gap before a menu
+key, stay blank.
 
-Gaps narrower than =my/enlight-rain-min-gap= stay blank, as does the
-gap between a menu label and its key, so words, the banner and the
-menus stay readable.
+Each column holds one drop with its own speed and a fading trail. A
+drop that falls off the bottom restarts above the top after a random
+pause. Cells keep their character between frames, and a share of them
+(=my/enlight-rain-glitch=) changes each frame.
 
-Each column holds one drop: a head moving down at its own speed with
-a trail that fades into the background. A drop that has fallen off
-the bottom comes back above the top after a random pause, which
-keeps the columns out of step. Every cell keeps its character between
-frames, so the trail looks like code being revealed, and a few cells
-change each frame to make the glyphs flicker.
-
-The layout depends on the window size, so each frame compares the
-size with the one the overlays were built for and rebuilds them when
-it changed. Like the shimmer, the loop stops when the page is not in
-the selected window, so it costs nothing while you work elsewhere. Its
-overlays are kept, so the page looks the same until the loop starts
-again.
-
-Keeping it cheap matters, because a frame blocks typing for as long
-as it takes:
-
-- redisplay is the main cost, and it grows with the number of lit
-  cells, since each one has its own face. Only every
-  =my/enlight-rain-column-step= columns carries rain, which halves
-  that work and leaves the gaps the film's rain has anyway,
-- every frame builds fresh strings for the overlays, and the garbage
-  they leave is a good share of the cost too, so fewer lit cells
-  also means fewer collections,
-- =config.el= is loaded as source, and interpreted Lisp is about three
-  times slower than byte code, so the functions that run every frame
-  are compiled once they are defined.
+Overlays are rebuilt when the window size changes. The loop stops,
+keeping the last frame, when the page is not in the selected window.
+Only every =my/enlight-rain-column-step= columns carries rain, and the
+per-frame functions are byte compiled at load.
 
 #+begin_src emacs-lisp
 (defvar my/enlight-rain-enabled t
@@ -2070,8 +1892,7 @@ as it takes:
 (defvar my/enlight-rain-min-gap 4
   "Gaps inside a line narrower than this stay blank.")
 (defvar my/enlight-rain-column-step 2
-  "Only every this many columns carries rain. 1 fills every column,
-at about twice the drawing cost.")
+  "Only every this many columns carries rain.")
 (defvar my/enlight-rain-chars
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ$+-*/=%\"'#&_(),.;:?!|{}<>[]^~"
   "Characters the rain is made of. Every one must be one column wide.")
@@ -2145,8 +1966,7 @@ Return the segments with the line's last one first."
          (column (lambda (pos) (+ margin (- pos bol))))
          segments)
     (cl-flet ((add (start end prop col width)
-                ;; Clamped, so a line wider than the window can't index
-                ;; past the last column.
+                ;; Width clamped to the window's last column.
                 (let ((ov (make-overlay start end)))
                   (push ov my/enlight--rain-overlays)
                   (push (list ov prop row col
@@ -2187,8 +2007,7 @@ Return the segments with the line's last one first."
   (setq my/enlight--rain-overlays nil
         my/enlight--rain-segments nil
         my/enlight--rain-size size)
-  ;; Margins are drawn as rain from here on, and truncating means an
-  ;; overlong line can never wrap and push the rows below out of step.
+  ;; Margins are drawn as rain, and lines never wrap.
   (setq-local line-prefix nil)
   (setq-local truncate-lines t)
   (pcase-let* ((`(,cols . ,rows) size)
@@ -2282,7 +2101,7 @@ While the minibuffer is active, the window it was opened from counts."
                           (window-body-height window)))
               (now (current-time)))
           (if (equal size my/enlight--rain-size)
-              ;; Capped, so a late frame doesn't jump the drops.
+              ;; At most 0.2s of movement per frame.
               (my/enlight--rain-step
                (min 0.2 (float-time (time-subtract now my/enlight--rain-time))))
             (my/enlight--rain-layout size))
@@ -2306,7 +2125,7 @@ While the minibuffer is active, the window it was opened from counts."
 
 (defun my/enlight-rain ()
   "Start the rain on freshly inserted start page content.
-The overlays from before the redraw are stale, so they go first."
+Deletes the overlays from before the redraw."
   (my/enlight-rain-stop)
   (mapc #'delete-overlay my/enlight--rain-overlays)
   (setq my/enlight--rain-overlays nil
@@ -2318,8 +2137,7 @@ The overlays from before the redraw are stale, so they go first."
   (my/enlight--rain-run my/enlight-rain-delay))
 
 (defun my/enlight--rain-resume (_window)
-  "Restart the rain when the start page becomes the selected window.
-Emacs also runs this when the page is left, hence the check."
+  "Restart the rain when the start page becomes the selected window."
   (when (my/enlight--rain-window)
     (my/enlight--rain-run 0)))
 
@@ -2339,18 +2157,11 @@ Emacs also runs this when the page is left, hence the check."
 ** Ghostel terminal
 
 Terminal backend for Claude sessions, built on Ghostty's VT engine. Its
-native module is downloaded from the GitHub releases on first use.
+native module is downloaded on first use.
 
-=s-p= / =s-n= scroll the chat five steps, while =C-p= / =C-n= go to the
-terminal like any other key, so they move through Claude's options and
-prompt history. When the app
-tracks the mouse (Claude Code's fullscreen renderer), its history lives
-inside the app and the buffer holds only the visible rows, so scrolling
-sends it wheel presses (button 4 up, 5 down) at the middle row. Claude
-does not use the alternate screen here, so =ghostel-alt-screen-p= cannot
-detect this. Otherwise the history is buffer text, so the Emacs window
-scrolls, and ghostel re-anchors it to the live cursor once it is back at
-the bottom.
+=s-p= / =s-n= scroll five steps, and =C-p= / =C-n= go to the terminal.
+When the app tracks the mouse, scrolling sends wheel presses (button 4
+up, 5 down) at the middle row; otherwise the Emacs window scrolls.
 
 #+begin_src emacs-lisp
 (use-package ghostel
@@ -2373,13 +2184,12 @@ A step is a wheel press when the app tracks the mouse, else a window line."
     (interactive)
     (my/ghostel-scroll 5 5))
 
-  ;; Super keys are never sent to the terminal, so no exception is needed.
   (define-key ghostel-mode-map (kbd "s-p") #'my/ghostel-scroll-up-5)
   (define-key ghostel-mode-map (kbd "s-n") #'my/ghostel-scroll-down-5)
-  ;; Copy and Emacs modes also inherit `ghostel-mode-map'; keep line motion.
+  ;; Line motion in copy and Emacs modes.
   (define-key ghostel-readonly-mode-map (kbd "s-p") #'my/previous-line-5)
   (define-key ghostel-readonly-mode-map (kbd "s-n") #'my/next-line-5)
-  ;; Sends M-DEL, which the Claude CLI treats as backward-kill-word.
+  ;; Sends M-DEL (backward-kill-word).
   (define-key ghostel-mode-map (kbd "s-<backspace>")
               (lambda () (interactive) (ghostel-send-key "backspace" "meta"))))
 #+end_src
@@ -2398,14 +2208,12 @@ new instance, and =C-c n= starts one in a new frame.
          ("C-c n" . my/claude-new-frame))
   :custom
   (claude-code-ide-terminal-backend 'ghostel)
-  ;; Diffs get their own frame, so the Claude window stays put in the main one.
+  ;; Diffs open in their own frame (see below).
   (claude-code-ide-show-claude-window-in-ediff nil)
   :init
   (defalias 'claude #'claude-code-ide-menu)
   :config
-  ;; The MCP HTTP server signals `json-rpc-error' without defining it, so its
-  ;; own handler cannot catch it. Defining it makes the server reply with a
-  ;; JSON-RPC error instead of crashing the process filter.
+  ;; Defines the `json-rpc-error' signalled by the MCP HTTP server.
   (define-error 'json-rpc-error "JSON-RPC error" 'error)
 
   ;; Answer the resources and prompts list requests with empty collections
@@ -2418,17 +2226,8 @@ new instance, and =C-c n= starts one in a new frame.
                   ("prompts/list" '((prompts . [])))
                   (_ (funcall orig method params)))))
 
-  ;; Review diffs in a new frame. The openDiff handler builds ediff in the
-  ;; selected frame, so selecting a fresh frame first is enough. The tab
-  ;; switch is skipped because it would look for Claude's tab in the new
-  ;; frame. The frame is tagged after the handler returns, since the handler
-  ;; first cleans up any older diff with the same tab name, and it is deleted
-  ;; if the handler exits any other way, including C-g.
-  ;;
-  ;; The diff frame fills the left half of the screen. Frame size parameters
-  ;; measure the text area only, so the title bar and fringes are subtracted
-  ;; to keep the minibuffer, where the accept prompt appears, on screen.
-  ;; The frame it was opened from is remembered so focus can return there.
+  ;; Diff frame filling the left half of the monitor's work area, outer
+  ;; size included. Remembers the frame it was opened from.
   (defun my/claude-diff-make-frame ()
     (pcase-let* ((`(,x ,y ,width ,height) (frame-monitor-workarea))
                  (frame (make-frame `((name . "Claude diff")
@@ -2441,9 +2240,9 @@ new instance, and =C-c n= starts one in a new frame.
                       t)
       frame))
 
-  ;; Claude writes accepted edits straight to disk, which leaves the file's
-  ;; buffer stale. The handler would then stop on a "Reread from disk?"
-  ;; prompt, so a stale buffer without unsaved edits is reverted first.
+  ;; Opens each diff in a new frame, tagged with its session and tab name.
+  ;; A stale file buffer without unsaved edits is reverted first. The
+  ;; frame is deleted if the handler exits abnormally, including C-g.
   (defun my/claude-diff-in-new-frame (orig arguments &optional session)
     (let ((buffer (find-buffer-visiting (alist-get 'old_file_path arguments)))
           (opened nil)
@@ -2464,9 +2263,7 @@ new instance, and =C-c n= starts one in a new frame.
         (unless opened
           (my/claude-diff-close-frame frame)))))
 
-  ;; Deleting a frame only changes the selected frame inside Emacs, and macOS
-  ;; leaves the remaining frame unfocused with a hollow cursor, so focus is
-  ;; handed back explicitly.
+  ;; Deletes FRAME and gives input focus back to its origin frame.
   (defun my/claude-diff-close-frame (frame)
     (let ((origin (frame-parameter frame 'my/claude-diff-origin)))
       (delete-frame frame)
@@ -2479,17 +2276,14 @@ new instance, and =C-c n= starts one in a new frame.
                   (and (eq (car tag) session) (equal (cdr tag) tab-name))))
               (frame-list)))
 
-  ;; Quitting ediff with q leaves its control panel alive, so when Claude
-  ;; then sends close_tab the handler quits ediff a second time, and that
-  ;; quit splits the selected frame. Running close_tab with the diff frame
-  ;; selected keeps those splits off the main frame.
+  ;; Runs close_tab with the diff frame selected.
   (defun my/claude-diff-close-in-frame (orig arguments &optional session)
     (if-let* ((frame (my/claude-diff-frame (alist-get 'tab_name arguments) session)))
         (with-selected-frame frame
           (funcall orig arguments session))
       (funcall orig arguments session)))
 
-  ;; Every way a diff ends goes through cleanup-diff, last of all.
+  ;; Deletes the diff frame when cleanup-diff runs.
   (defun my/claude-diff-delete-frame (tab-name session)
     (when-let* ((frame (my/claude-diff-frame tab-name session)))
       (my/claude-diff-close-frame frame)))
@@ -2498,11 +2292,9 @@ new instance, and =C-c n= starts one in a new frame.
   (advice-add 'claude-code-ide-mcp-handle-close-tab :around #'my/claude-diff-close-in-frame)
   (advice-add 'claude-code-ide-mcp--cleanup-diff :after #'my/claude-diff-delete-frame)
 
-  ;; Start a new instance in a frame of its own. The project is resolved
-  ;; from the buffer the command was called from, and the side window is
-  ;; turned off so the instance fills the new frame. The frame is deleted
-  ;; if the start fails or is quit, such as C-g at the name prompt, and
-  ;; when the instance's buffer is killed, which happens when Claude exits.
+  ;; Starts a new instance filling a frame of its own, using the calling
+  ;; buffer's project. The frame is deleted if the start fails or is quit,
+  ;; and when the instance's buffer is killed.
   (defun my/claude-new-frame ()
     (interactive)
     (let ((origin (current-buffer))
@@ -2524,12 +2316,8 @@ new instance, and =C-c n= starts one in a new frame.
         (unless started
           (delete-frame frame)))))
 
-  ;; The MCP tools are read-only, so Claude acts on the live session (such
-  ;; as switching open buffers to a new major mode) through emacsclient,
-  ;; which needs the Emacs server. New, continue and resume all go through
-  ;; `claude-code-ide--start-session', so starting the server there covers
-  ;; every launch. It is a private function, so this may need updating if
-  ;; the package renames it.
+  ;; Starts the Emacs server before every session launch, for emacsclient.
+  ;; Advises the private `claude-code-ide--start-session'.
   (defun my/claude-ensure-server (&rest _)
     (require 'server)
     (unless (server-running-p)
@@ -2551,7 +2339,8 @@ new instance, and =C-c n= starts one in a new frame.
 
 * Discord
 
-elcord shows the current buffer as Discord Rich Presence. It talks to the desktop Discord app over a local IPC socket, so no login or token is needed, Discord just has to be running.
+elcord shows the current buffer as Discord Rich Presence through the
+running desktop Discord app.
 
 #+begin_src emacs-lisp
 (use-package elcord
