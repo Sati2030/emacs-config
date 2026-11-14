@@ -1598,6 +1598,10 @@ Global editing commands and their bindings.
 (global-set-key (kbd "C-c ,") #'scroll-down-line)
 (global-set-key (kbd "C-c .") #'scroll-up-line)
 
+;; `backward-word' skips any non-word characters before it looks for a
+;; word, newlines included. On a line holding only "// " it would run
+;; back onto the previous line and eat its last word too, so the jump
+;; is clamped to the start of the current line.
 (defun my/backward-kill-word-on-line ()
   "Like `backward-kill-word', but stop at the start of the line.
 At the start of a line, delete the preceding newline instead."
@@ -1607,7 +1611,7 @@ At the start of a line, delete the preceding newline instead."
     (skip-syntax-backward " " bol)
     (if (= (point) bol)
         (delete-char -1)
-      (backward-word 1)
+      (goto-char (max bol (save-excursion (backward-word 1) (point))))
       (kill-region (point) start))))
 
 (global-set-key (kbd "s-<backspace>") #'my/backward-kill-word-on-line)
