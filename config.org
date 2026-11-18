@@ -454,6 +454,22 @@ change.
                             (remq 'idle-change flycheck-check-syntax-automatically))))))
 #+end_src
 
+** Errors before LSP hover in eldoc
+
+Flycheck and lsp-mode both report through eldoc, which shows only the
+first source that returns text. This puts Flycheck's source first in
+LSP buffers, so the echo area shows the error at point when there is
+one and LSP hover docs otherwise.
+
+#+begin_src emacs-lisp
+(defun my/flycheck-eldoc-first ()
+  "Order flycheck's eldoc source before LSP hover."
+  (remove-hook 'eldoc-documentation-functions #'flycheck-eldoc-function t)
+  (add-hook 'eldoc-documentation-functions #'flycheck-eldoc-function -50 t))
+
+(add-hook 'lsp-managed-mode-hook #'my/flycheck-eldoc-first)
+#+end_src
+
 * Language Server Protocol
 
 ** lsp-mode
