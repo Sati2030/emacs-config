@@ -1304,6 +1304,26 @@ Reports EVENT when the server exits on its own rather than being stopped."
                (process-name process) (string-trim event)))))
 #+end_src
 
+**** Key binding
+
+=C-c f= toggles the preview from HTML, CSS, JS and TS buffers. The key
+lives in =my/frontend-mode=, a minor mode switched on by the hooks of
+the four parent modes those languages derive from, so one keymap covers
+=mhtml-mode=, =css-ts-mode=, =js-ts-mode=, =tsx-ts-mode= and the rest.
+
+#+begin_src emacs-lisp
+(define-minor-mode my/frontend-mode
+  "Frontend helpers for web buffers.
+\\{my/frontend-mode-map}"
+  :keymap `((,(kbd "C-c f") . my/frontend-preview)))
+
+(dolist (hook '(html-mode-hook
+                css-base-mode-hook
+                js-base-mode-hook
+                typescript-ts-base-mode-hook))
+  (add-hook hook #'my/frontend-mode))
+#+end_src
+
 *** Browser console in Emacs
 
 =lisp/frontend-console-proxy.js= (Node, no dependencies) is a reverse
