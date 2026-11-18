@@ -1645,7 +1645,8 @@ matching uppercase opens its code in =~/dev/QUT=.
        ("Edit config"    (find-file "~/.emacs.d/config.org") "e"))
       ("Other"
        ("QUT"              (dired "~/Documents/QUT")                    "q")
-       ("CodeCrafters GIT" (dired "~/Documents/CodeCrafters/git_Seiji") "g"))))))
+       ("CodeCrafters GIT" (dired "~/Documents/CodeCrafters/git_Seiji") "g")
+       ("Personal website" (dired "~/dev/personal_webstie")             "w"))))))
 
 (defun my/enlight-build ()
   "Assemble the banner, the date line and the menu row into one string."
