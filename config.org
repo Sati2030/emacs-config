@@ -2326,6 +2326,30 @@ new instance, and =C-c n= starts one in a new frame.
 
   (advice-add 'claude-code-ide--start-session :before #'my/claude-ensure-server)
 
+  ;; Previews (frontend and markdown) live in the right side window, slot 0,
+  ;; which is the same spot Claude asks for, so Claude would replace them.
+  ;; While an xwidget is visible, Claude splits the main window to the
+  ;; right instead. Advises the private
+  ;; `claude-code-ide--display-buffer-in-side-window'.
+  (defun my/claude-xwidget-visible-p ()
+    (seq-some (lambda (window)
+                (with-current-buffer (window-buffer window)
+                  (derived-mode-p 'xwidget-webkit-mode)))
+              (window-list)))
+
+  (defun my/claude-beside-preview (orig buffer)
+    (if (my/claude-xwidget-visible-p)
+        (let ((claude-code-ide-use-side-window nil)
+              (display-buffer-overriding-action
+               '((display-buffer-reuse-window display-buffer-in-direction)
+                 (direction . right)
+                 (window . main))))
+          (funcall orig buffer))
+      (funcall orig buffer)))
+
+  (advice-add 'claude-code-ide--display-buffer-in-side-window
+              :around #'my/claude-beside-preview)
+
   (claude-code-ide-emacs-tools-setup))
 #+end_src
 
